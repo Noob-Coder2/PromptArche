@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+jinja2
+supabase
+scikit-learn
+umap-learn
+hdbscan
+pandas
+numpy
+requests
+python-dotenv
+tenacity
+httpx
+pyjwt
