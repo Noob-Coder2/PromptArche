@@ -92,3 +92,12 @@ using (auth.uid() = user_id);
 create policy "Users can insert their own insights" 
 on insights for insert 
 with check (auth.uid() = user_id);
+
+-- Performance Views
+create or replace view prompt_stats_daily as
+select 
+  date_trunc('day', created_at) as day, 
+  user_id,
+  count(*) as count
+from prompts
+group by 1, 2;

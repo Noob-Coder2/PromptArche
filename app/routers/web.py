@@ -1,18 +1,38 @@
 
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.core.security import verify_jwt, get_current_user_id
-from app.services.ingestion import ingest_chatgpt_export
+from app.services.ingestion import IngestionService
 from app.db.supabase import get_supabase
+from app.core.config import settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+@router.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "supabase_url": settings.SUPABASE_URL,
+        "supabase_key": settings.SUPABASE_KEY
+    })
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "supabase_url": settings.SUPABASE_URL,
+        "supabase_key": settings.SUPABASE_KEY
+    })
+
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_view(request: Request, user_id: str = Depends(get_current_user_id)): # Note: Using get_current_user_id logic that parses cookie/token
+async def dashboard_view(request: Request, user_id: str = Depends(get_current_user_id)):
+    # This dependency now strictly validates the JWT from cookie or header.
     supabase = get_supabase()
+    
+    # Check if user exists? Optional. JWT is trusted.
     
     # Fetch Stats
     # Note: Supabase-py count can be tricky.
@@ -31,27 +51,15 @@ async def dashboard_view(request: Request, user_id: str = Depends(get_current_us
     clusters = clusters_res.data
     
     # Fetch Timeline Data (Chart.js)
-    # Group by Date... PostgREST doesn't do complex group-by easy.
-    # We'll fetch 'created_at' of all prompts (lightweight-ish if only id+date) and process in python for MVP.
-    # Limitation: If user has 10k prompts, this is slow.
-    # Better: Use a Postgres Function (RPC).
-    # For MVP: Limit to last 1000 prompts.
+    # Optimized: Query the View `prompt_stats_daily`
+    timeline_res = supabase.table("prompt_stats_daily").select("day, count").eq("user_id", user_id).order("day", desc=False).limit(365).execute()
     
-    timeline_res = supabase.table("prompts").select("created_at").eq("user_id", user_id).order("created_at", desc=True).limit(1000).execute()
-    
-    # Process in Python: Group by Day
-    from collections import defaultdict
-    from datetime import datetime
-    
-    date_counts = defaultdict(int)
+    date_counts = {}
     for row in timeline_res.data:
-        try:
-             # ISO format: 2024-01-24T10:00:00...
-             dt_str = row['created_at'].split('T')[0]
-             date_counts[dt_str] += 1
-        except:
-             continue
-             
+        # Postgres date_trunc returns timestamp, e.g. 2024-01-01T00:00:00+00:00
+        d_str = row['day'].split('T')[0] 
+        date_counts[d_str] = row['count']
+
     # Sort
     sorted_dates = sorted(date_counts.keys())
     chart_data = {
@@ -70,22 +78,47 @@ async def dashboard_view(request: Request, user_id: str = Depends(get_current_us
 async def upload_view(request: Request):
     return templates.TemplateResponse("upload.html", {"request": request})
 
-@router.post("/api/ingest/chatgpt")
-async def ingest_chatgpt(
+@router.post("/api/ingest")
+async def ingest_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    provider: str = Form("chatgpt"),
     user_id: str = Depends(get_current_user_id)
 ):
-    content = await file.read()
+    # Solved: Memory-bound & Blocking.
+    # 1. Stream file to temp disk (FastAPI UploadFile is Spooled, but let's be safe and persisting it for background task is better).
+    #    Actually, `file.file` is a `SpooledTemporaryFile`. If we pass it to BG task, it might be closed.
+    #    We must copy it to a named temp file.
+    import shutil
+    import tempfile
     
-    # We call the service function. 
-    # Ideally should be a background task IF the parsing is heavy.
-    # Parsing JSON of 50MB is synchronous and might block.
-    # Let's run it in an async wrapper or just handle it.
+    # Create temp file
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        shutil.copyfileobj(file.file, tmp)
+        tmp.close()
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": "Failed to save upload"}, status_code=500)
     
-    result = await ingest_chatgpt_export(content, user_id)
+    # 2. Add Background Task
+    # We pass the file_path. The task must open it, process, and delete it.
+    background_tasks.add_task(process_upload_background, tmp.name, provider, user_id)
     
-    return result
+    return {"status": "success", "message": "Ingestion started in background"}
+
+def process_upload_background(file_path: str, provider: str, user_id: str):
+    import os
+    try:
+        with open(file_path, 'rb') as f:
+            # Run sync ingestion
+            IngestionService.ingest_sync(f, provider, user_id)
+    except Exception as e:
+        print(f"Background Ingestion Error: {e}")
+    finally:
+        # Cleanup
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 
 # We need to wire this router to main.py
 # Also need to fix 'get_current_user_id' to look at Cookie if not Bearer is passed?

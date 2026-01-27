@@ -8,7 +8,7 @@ from app.db.supabase import get_supabase
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 async def generate_cluster_insight(cluster_id: str, user_id: str):
     """
@@ -30,13 +30,13 @@ async def generate_cluster_insight(cluster_id: str, user_id: str):
     You are a brutally honest coding coach and prompt engineer. 
     Analyze the following list of user prompts which form a semantic cluster.
     Identify the common pattern, intent, or bad habit.
-    Give a short, punchy title (max 5 words) and a "Brutal Insight" (max 2 sentences).
+    Give a short, punchy title (max 5 words) and a "Brutal Insight" (max 3 sentences).
     Tell them if they are over-engineering, being lazy, or hallucinating.
     Format your response as JSON: {"title": "...", "insight": "..."}
     """
     
     payload = {
-        "model": "glm-4-airX", # Or any cheap/free model supported
+        "model": "qwen/qwen3-32b", # User specified model
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Analyze these prompts:\n{prompt_text}"}
@@ -45,15 +45,15 @@ async def generate_cluster_insight(cluster_id: str, user_id: str):
     }
     
     headers = {
-        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {settings.GROQ_API_KEY}",
         # "HTTP-Referer": "https://promp-arche.app", # Optional
     }
     
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(OPENROUTER_URL, headers=headers, json=payload, timeout=20.0)
+            resp = await client.post(GROQ_URL, headers=headers, json=payload, timeout=20.0)
             if resp.status_code != 200:
-                logger.error(f"OpenRouter Error: {resp.text}")
+                logger.error(f"Groq Error: {resp.text}")
                 return
                 
             data = resp.json()

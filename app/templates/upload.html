@@ -10,6 +10,17 @@
     </header>
 
     <div class="bg-slate-900 border border-white/10 rounded-xl p-8 shadow-lg">
+        <!-- Provider Select -->
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-slate-400 mb-2">Source</label>
+            <select x-model="provider"
+                class="block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
+                <option value="chatgpt">ChatGPT (conversations.json)</option>
+                <option value="claude">Claude (json)</option>
+                <option value="gemini">Gemini (json)</option>
+            </select>
+        </div>
+
         <!-- Dropzone -->
         <div class="flex justify-center items-center w-full">
             <label for="dropzone-file"
@@ -27,6 +38,8 @@
                 <input id="dropzone-file" type="file" accept=".json" class="hidden" @change="handleFileChange" />
             </label>
         </div>
+
+
 
         <div x-show="fileName" class="mt-4 text-center text-sm text-primary" x-text="'Selected: ' + fileName"></div>
 
@@ -52,6 +65,7 @@
         return {
             file: null,
             fileName: '',
+            provider: 'chatgpt',
             uploading: false,
             statusMessage: '',
             statusType: 'success',
@@ -71,11 +85,12 @@
                 this.uploading = true;
                 const formData = new FormData();
                 formData.append('file', this.file);
+                formData.append('provider', this.provider);
 
                 try {
                     // We need to send the Auth token. Check cookie.
                     // If we use standard fetch, cookies are sent automatically to same-origin.
-                    const response = await fetch('/api/ingest/chatgpt', {
+                    const response = await fetch('/api/ingest', {
                         method: 'POST',
                         body: formData
                     });
