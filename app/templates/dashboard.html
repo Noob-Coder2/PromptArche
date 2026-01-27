@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - PromprtArche{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <header>
+        <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">Your
+            Evolution</h1>
+        <p class="text-slate-400">Analysis of your prompting journey.</p>
+    </header>
+
+    <!-- Stats Overview -->
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <!-- Card 1 -->
+        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5">
+            <div class="px-4 py-5 sm:p-6">
+                <dt class="text-sm font-medium text-slate-400 truncate">Total Prompts</dt>
+                <dd class="mt-1 text-3xl font-semibold text-white">{{ stats.total_prompts }}</dd>
+            </div>
+        </div>
+        <!-- Card 2 -->
+        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5">
+            <div class="px-4 py-5 sm:p-6">
+                <dt class="text-sm font-medium text-slate-400 truncate">Clusters Identified</dt>
+                <dd class="mt-1 text-3xl font-semibold text-white">{{ stats.total_clusters }}</dd>
+            </div>
+        </div>
+        <!-- Card 3 -->
+        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5">
+            <div class="px-4 py-5 sm:p-6">
+                <dt class="text-sm font-medium text-slate-400 truncate">Insights Generated</dt>
+                <dd class="mt-1 text-3xl font-semibold text-white">{{ stats.total_insights }}</dd>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart: Timeline -->
+    <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-6">
+        <h3 class="text-lg leading-6 font-medium text-white mb-4">Prompt Volume Over Time</h3>
+        <div class="relative h-64 w-full">
+            <canvas id="timelineChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Cluster Grid -->
+    <div>
+        <h3 class="text-lg leading-6 font-medium text-white mb-4">Dominant Clusters</h3>
+        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {% for cluster in clusters %}
+            <div
+                class="bg-slate-900 border border-white/5 rounded-lg shadow-sm hover:border-primary/50 transition duration-300">
+                <div class="p-6 space-y-4">
+                    <div class="flex justify-between items-start">
+                        <h4 class="text-xl font-bold text-white">{{ cluster.label }}</h4>
+                        <!-- Badge? -->
+                    </div>
+                    <p class="text-slate-400 text-sm line-clamp-3">
+                        {{ cluster.description }}
+                    </p>
+                    <div class="pt-4 border-t border-white/5">
+                        <a href="/cluster/{{ cluster.id }}"
+                            class="text-primary hover:text-indigo-400 text-sm font-medium">View Analysis &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if not clusters %}
+            <div class="col-span-full text-center py-12 text-slate-500">
+                No clusters found yet. Upload data to get started.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const ctx = document.getElementById('timelineChart').getContext('2d');
+        const data = {{ chart_data | tojson
+    }}; // Expecting labels and values
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Prompts',
+                data: data.values,
+                borderColor: '#6366f1',
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+    });
+</script>
+{% endblock %}

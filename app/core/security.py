@@ -1,16 +1,31 @@
 
 import jwt
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Security, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-def verify_jwt(credentials: HTTPAuthorizationCredentials = Security(security)):
+def verify_jwt(request: Request = None, credentials: HTTPAuthorizationCredentials = Security(security)):
     """
     Verifies the Supabase JWT token.
+    Checks 'Authorization' header first, then 'access_token' cookie.
     """
-    token = credentials.credentials
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif request:
+        token = request.cookies.get("access_token")
+        
+    if not token:
+        # If this dependency is optional, return None? 
+        # But 'verify_jwt' implies strict check.
+        # Let's enforce it.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication credentials",
+        )
+
     try:
         # Supabase uses HS256 and the JWT secret to sign tokens.
         # We verify the signature and expiration.

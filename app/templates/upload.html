@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Upload - PromprtArche{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-8" x-data="uploadFunc()">
+    <header class="text-center">
+        <h1 class="text-3xl font-bold text-white">Ingest Your History</h1>
+        <p class="text-slate-400 mt-2">Upload your `conversations.json` from ChatGPT.</p>
+    </header>
+
+    <div class="bg-slate-900 border border-white/10 rounded-xl p-8 shadow-lg">
+        <!-- Dropzone -->
+        <div class="flex justify-center items-center w-full">
+            <label for="dropzone-file"
+                class="flex flex-col justify-center items-center w-full h-64 bg-slate-950 rounded-lg border-2 border-dashed border-slate-600 cursor-pointer hover:bg-slate-800 transition">
+                <div class="flex flex-col justify-center items-center pt-5 pb-6">
+                    <svg class="mb-3 w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                        </path>
+                    </svg>
+                    <p class="mb-2 text-sm text-slate-400"><span class="font-semibold">Click to upload</span> or drag
+                        and drop</p>
+                    <p class="text-xs text-slate-500">conversations.json (JSON)</p>
+                </div>
+                <input id="dropzone-file" type="file" accept=".json" class="hidden" @change="handleFileChange" />
+            </label>
+        </div>
+
+        <div x-show="fileName" class="mt-4 text-center text-sm text-primary" x-text="'Selected: ' + fileName"></div>
+
+        <!-- Action Buttons -->
+        <div class="mt-6">
+            <button @click="uploadFile" :disabled="!file || uploading"
+                class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-pink-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition">
+                <span x-show="!uploading">Start Ingestion</span>
+                <span x-show="uploading">Processing...</span>
+            </button>
+        </div>
+
+        <!-- Status -->
+        <div x-show="statusMessage"
+            :class="{'text-green-400': statusType === 'success', 'text-red-400': statusType === 'error'}"
+            class="mt-4 text-center text-sm font-medium" x-text="statusMessage">
+        </div>
+    </div>
+</div>
+
+<script>
+    function uploadFunc() {
+        return {
+            file: null,
+            fileName: '',
+            uploading: false,
+            statusMessage: '',
+            statusType: 'success',
+
+            handleFileChange(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    this.file = file;
+                    this.fileName = file.name;
+                    this.statusMessage = '';
+                }
+            },
+
+            async uploadFile() {
+                if (!this.file) return;
+
+                this.uploading = true;
+                const formData = new FormData();
+                formData.append('file', this.file);
+
+                try {
+                    // We need to send the Auth token. Check cookie.
+                    // If we use standard fetch, cookies are sent automatically to same-origin.
+                    const response = await fetch('/api/ingest/chatgpt', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        this.statusType = 'success';
+                        this.statusMessage = `Success! ${result.processed || 0} prompts queued.`;
+                    } else {
+                        throw new Error(result.detail || 'Upload failed');
+                    }
+                } catch (e) {
+                    this.statusType = 'error';
+                    this.statusMessage = e.message;
+                } finally {
+                    this.uploading = false;
+                }
+            }
+        }
+    }
+</script>
+{% endblock %}

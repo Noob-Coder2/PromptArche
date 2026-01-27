@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PromprtArche{% endblock %}</title>
+    
+    <!-- CDN Stats: Lightweight versions where possible -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#ec4899', 
+                        dark: '#0f172a',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="h-full text-slate-200 antialiased font-sans">
+    
+    <!-- Navigation -->
+    <nav class="border-b border-white/10 bg-slate-900/50 backdrop-blur-md fixed w-full top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+                        PromprtArche
+                    </a>
+                </div>
+                <!-- Simple Auth Links (Conditional would need user context) -->
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        <a href="/dashboard" class="hover:bg-white/10 px-3 py-2 rounded-md text-sm font-medium transition">Dashboard</a>
+                        <a href="/upload" class="hover:bg-white/10 px-3 py-2 rounded-md text-sm font-medium transition">Upload</a>
+                    </div>
+                </div>
+                <div>
+                     <button onclick="document.cookie='access_token=; Max-Age=0; path=/;'; window.location.href='/login'" class="text-sm text-slate-400 hover:text-white transition">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="pt-20 min-h-screen">
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/10 bg-slate-950 py-6 mt-12">
+        <div class="text-center text-slate-500 text-sm">
+            &copy; 2024 PromprtArche. Brutally Honest Insights.
+        </div>
+    </footer>
+
+</body>
+</html>
