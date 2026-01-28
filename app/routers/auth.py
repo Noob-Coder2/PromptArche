@@ -22,7 +22,7 @@ async def api_login(response: Response, access_token: str):
         httponly=True,
         samesite="lax",
         secure=False,  # Set to True in production with HTTPS
-        max_age=3600 * 24 * 7  # 7 days
+        max_age=3600 * 24  # 1 day
     )
     return {"status": "success"}
 
