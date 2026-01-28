@@ -20,9 +20,9 @@ SUPPORTED_PROVIDERS = {
         "required_fields": ["chat_messages"],
         "description": "Claude conversation export format"
     },
-    "gemini": {
-        "required_fields": ["messages"],
-        "description": "Gemini conversation export format"
+    "grok": {
+        "required_fields": ["conversations"],
+        "description": "Grok conversation export format"
     }
 }
 
@@ -67,7 +67,7 @@ def validate_json_structure(file: UploadFile, provider: str) -> Dict[str, Any]:
     
     Args:
         file: UploadFile containing JSON data
-        provider: Data provider type (chatgpt, claude, gemini)
+        provider: Data provider type (chatgpt, claude, grok)
         
     Returns:
         Parsed JSON data
@@ -115,19 +115,28 @@ def validate_json_structure(file: UploadFile, provider: str) -> Dict[str, Any]:
                     detail="Claude export cannot be empty"
                 )
                 
-        elif provider == "gemini":
-            if not isinstance(json_data, list):
+        elif provider == "grok":
+            if not isinstance(json_data, dict):
                 raise HTTPException(
                     status_code=400,
-                    detail="Gemini export must be a list of conversations"
+                    detail="Grok export must be a JSON object"
                 )
-            if not json_data:
+            if "conversations" not in json_data:
                 raise HTTPException(
                     status_code=400,
-                    detail="Gemini export cannot be empty"
+                    detail="Grok export must contain 'conversations' key"
+                )
+            if not json_data["conversations"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Grok export conversations cannot be empty"
                 )
         
-        logger.info(f"Validated {provider} export with {len(json_data)} items")
+        # Log validation success with proper count
+        if provider == "grok":
+            logger.info(f"Validated {provider} export with {len(json_data.get('conversations', []))} conversations")
+        else:
+            logger.info(f"Validated {provider} export with {len(json_data)} items")
         return json_data
         
     except json.JSONDecodeError as e:

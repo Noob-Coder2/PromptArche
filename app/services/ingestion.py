@@ -72,48 +72,112 @@ class ChatGPTParser(IngestionParser):
 class ClaudeParser(IngestionParser):
     def parse(self, file_obj: IO) -> Generator[Dict[str, Any], None, None]:
         try:
-            # Assuming Claude export is a list of chats
-            chats = ijson.items(file_obj, 'item')
-            for chat in chats:
-                messages = chat.get('chat_messages', [])
-                for msg in messages:
+            # Claude export: Array of conversation objects
+            # Each has: {account: {...}, chat_messages: [...], created_at, name, uuid}
+            conversations = ijson.items(file_obj, 'item')
+            for conversation in conversations:
+                conversation_uuid = conversation.get('uuid')
+                conversation_name = conversation.get('name', '')
+                
+                # Each message in chat_messages array
+                chat_messages = conversation.get('chat_messages', [])
+                for msg in chat_messages:
+                    # Filter for human messages
+                    # Note: sender can be "human" or "assistant"
                     if msg.get('sender') == 'human':
-                        text = msg.get('text', '')
+                        # Content is an array of objects: [{type: "text", text: "..."}]
+                        # Sometimes there's also a direct 'text' field (legacy/backup)
+                        text = ''
+                        
+                        # Try content array first (official format)
+                        content_array = msg.get('content', [])
+                        if content_array and isinstance(content_array, list):
+                            for content_item in content_array:
+                                if isinstance(content_item, dict) and content_item.get('type') == 'text':
+                                    text = content_item.get('text', '')
+                                    break
+                        
+                        # Fallback to direct text field if content array didn't work
+                        if not text:
+                            text = msg.get('text', '')
+                        
+                        if not text.strip():
+                            continue
+                        
+                        # Timestamps are ISO format strings (already formatted)
                         created_at = msg.get('created_at', datetime.now().isoformat())
+                        
                         yield {
-                            "content": text,
+                            "content": text.strip(),
                             "source": "claude",
                             "created_at": created_at,
-                            "metadata": {"conversation_uuid": chat.get('uuid')}
+                            "metadata": {
+                                "conversation_uuid": conversation_uuid,
+                                "conversation_name": conversation_name,
+                                "message_uuid": msg.get('uuid')
+                            }
                         }
         except Exception as e:
             logger.error(f"Claude Parse Error: {e}")
 
-class GeminiParser(IngestionParser):
+
+class GrokParser(IngestionParser):
     def parse(self, file_obj: IO) -> Generator[Dict[str, Any], None, None]:
         try:
-            # Gemini Takeout is a list of conversations
-            conversations = ijson.items(file_obj, 'item')
-            for convo in conversations:
-                messages = convo.get('messages', [])
-                title = convo.get('title')
+            # Grok export structure: {conversations: [{conversation: {...}, responses: [...]}]}
+            # We need to use ijson to stream parse the nested structure
+            # ijson path: 'conversations.item' gets each conversation object
+            
+            for conversation_data in ijson.items(file_obj, 'conversations.item'):
+                # Extract conversation metadata
+                conversation_info = conversation_data.get('conversation', {})
+                conversation_id = conversation_info.get('id')
+                title = conversation_info.get('title', '')
                 
-                for msg in messages:
-                    role = msg.get('author') or msg.get('role')
-                    if role == 'user':
-                        text = msg.get('content', '')
+                # Parse responses array
+                responses = conversation_data.get('responses', [])
+                for response_wrapper in responses:
+                    response = response_wrapper.get('response', {})
+                    
+                    # Only process human messages
+                    if response.get('sender') == 'human':
+                        text = response.get('message', '').strip()
                         if not text:
                             continue
                         
-                        created_at = msg.get('created_at', datetime.now().isoformat())
+                        # Parse timestamp from nested $date.$numberLong structure
+                        create_time_obj = response.get('create_time', {})
+                        timestamp_ms = None
+                        
+                        if isinstance(create_time_obj, dict):
+                            date_obj = create_time_obj.get('$date', {})
+                            if isinstance(date_obj, dict):
+                                number_long = date_obj.get('$numberLong')
+                                if number_long:
+                                    try:
+                                        # Convert from milliseconds to seconds
+                                        timestamp_ms = int(number_long) / 1000
+                                    except (ValueError, TypeError):
+                                        pass
+                        
+                        if timestamp_ms:
+                            created_at = datetime.fromtimestamp(timestamp_ms).isoformat()
+                        else:
+                            created_at = datetime.now().isoformat()
+                        
                         yield {
                             "content": text,
-                            "source": "gemini",
+                            "source": "grok",
                             "created_at": created_at,
-                            "metadata": {"title": title}
+                            "metadata": {
+                                "conversation_id": conversation_id,
+                                "title": title,
+                                "response_id": response.get('_id')
+                            }
                         }
         except Exception as e:
-             logger.error(f"Gemini Parse Error: {e}")
+            logger.error(f"Grok Parse Error: {e}")
+
 
 # --- Service ---
 class IngestionService:
@@ -185,7 +249,7 @@ class IngestionService:
         
         Args:
             file_obj: File-like object to parse (seekable)
-            provider: Data provider (chatgpt, claude, gemini)
+            provider: Data provider (chatgpt, claude, grok)
             user_id: User's UUID string
             job_id: Optional job ID for progress tracking
             
@@ -197,7 +261,7 @@ class IngestionService:
         parser_map = {
             "chatgpt": ChatGPTParser(),
             "claude": ClaudeParser(),
-            "gemini": GeminiParser()
+            "grok": GrokParser()
         }
         
         parser = parser_map.get(provider)
