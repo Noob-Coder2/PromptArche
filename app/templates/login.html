@@ -1,24 +1,25 @@
 {% extends "base.html" %}
 
-{% block title %}Login - PromprtArche{% endblock %}
+{% block title %}Login - PromptArche{% endblock %}
 
 {% block content %}
 <div class="flex min-h-[80vh] items-center justify-center" x-data="loginFunc()">
     <div class="w-full max-w-md bg-slate-900 border border-white/10 rounded-xl p-8 shadow-2xl">
-        <h2 class="text-3xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+        <h2
+            class="text-3xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
             Enter the Arche
         </h2>
-        
+
         <form @submit.prevent="handleLogin" class="space-y-6">
             <div>
                 <label for="email" class="block text-sm font-medium text-slate-400">Email</label>
-                <input type="email" x-model="email" required 
+                <input type="email" x-model="email" required
                     class="mt-1 block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
             </div>
 
             <div>
                 <label for="password" class="block text-sm font-medium text-slate-400">Password</label>
-                <input type="password" x-model="password" required 
+                <input type="password" x-model="password" required
                     class="mt-1 block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
             </div>
 
@@ -41,11 +42,11 @@
             password: '',
             loading: false,
             errorMessage: '',
-            
+
             async handleLogin() {
                 this.loading = true;
                 this.errorMessage = '';
-                
+
                 // Initialize Supabase Client (Access keys should be public in frontend for Supabase JS usually, 
                 // but here we might need to inject them or fetch them. 
                 // For MVP, I'll inject via environment variables capable Jinja or just hardcode for demo? 
@@ -53,27 +54,27 @@
                 // I will fetch env vars from a simple endpoint or assume valid keys provided.
                 // Actually, I'll use a fetch to my own backend to login to keep keys hidden if I want, 
                 // BUT Supabase JS pattern uses public anon key.
-                
+
                 try {
                     // We need the keys. I'll pass them in the template context from main.py
                     const supabaseUrl = "{{ supabase_url }}";
                     const supabaseKey = "{{ supabase_key }}";
                     const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
-                    
+
                     const { data, error } = await _supabase.auth.signInWithPassword({
                         email: this.email,
                         password: this.password,
                     });
-                    
+
                     if (error) throw error;
-                    
+
                     // Set cookie for FastAPI to read
                     const accessToken = data.session.access_token;
                     document.cookie = `access_token=${accessToken}; path=/; max-age=3600; SameSite=Lax`;
-                    
+
                     // Redirect
                     window.location.href = "/dashboard";
-                    
+
                 } catch (e) {
                     this.errorMessage = e.message;
                 } finally {

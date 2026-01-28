@@ -4,11 +4,15 @@ import logging
 import httpx
 import ijson
 import warnings
-from typing import List, Dict, Any, Generator, IO
+import tempfile
+import shutil
+import os
+from typing import List, Dict, Any, Generator, IO, Optional
 from datetime import datetime
 from uuid import UUID
 from abc import ABC, abstractmethod
 
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.db.supabase import get_supabase
 
@@ -110,12 +114,67 @@ class GeminiParser(IngestionParser):
 
 # --- Service ---
 class IngestionService:
+    """
+    Service for handling file ingestion with progress tracking and resilient database operations.
+    """
+    
+    # --- File Handling Utilities ---
     @staticmethod
-    def ingest_sync(file_obj: IO, provider: str, user_id: UUID):
+    def save_upload_to_temp(upload_file) -> str:
+        """
+        Save an UploadFile to a temporary file for background processing.
+        
+        Args:
+            upload_file: FastAPI UploadFile object
+            
+        Returns:
+            Path to the temporary file
+        """
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
+        try:
+            shutil.copyfileobj(upload_file.file, tmp)
+            tmp.close()
+            logger.debug(f"Saved upload to temp file: {tmp.name}")
+            return tmp.name
+        except Exception as e:
+            logger.error(f"Failed to save upload to temp: {e}")
+            raise
+    
+    @staticmethod
+    def cleanup_temp_file(file_path: str):
+        """
+        Safely remove a temporary file.
+        
+        Args:
+            file_path: Path to the file to remove
+        """
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.debug(f"Cleaned up temp file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file {file_path}: {e}")
+    
+    # --- Ingestion Methods ---
+    @staticmethod
+    def ingest_sync(
+        file_obj: IO,
+        provider: str,
+        user_id: str,
+        job_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Synchronous ingestion to be run in a thread pool.
         Accepts a file-like object (bytes stream).
+        
+        Args:
+            file_obj: File-like object to parse
+            provider: Data provider (chatgpt, claude, gemini)
+            user_id: User's UUID string
+            job_id: Optional job ID for progress tracking
         """
+        from app.services.job_service import IngestionJobService
+        
         parser_map = {
             "chatgpt": ChatGPTParser(),
             "claude": ClaudeParser(),
@@ -124,7 +183,13 @@ class IngestionService:
         
         parser = parser_map.get(provider)
         if not parser:
+            if job_id:
+                IngestionJobService.fail_job(job_id, f"Unknown provider: {provider}")
             return {"status": "error", "message": f"Unknown provider: {provider}"}
+        
+        # Update job status
+        if job_id:
+            IngestionJobService.update_progress(job_id, "PARSING")
             
         prompts_buffer = []
         success_count = 0
@@ -137,30 +202,57 @@ class IngestionService:
                 prompts_buffer.append(parsed_item)
                 
                 if len(prompts_buffer) >= 100:
-                    IngestionService._flush_buffer(supabase, prompts_buffer)
+                    IngestionService._flush_buffer_with_retry(supabase, prompts_buffer)
                     success_count += len(prompts_buffer)
                     prompts_buffer = []
                     
+                    # Update progress
+                    if job_id:
+                        IngestionJobService.update_progress(
+                            job_id, "PARSING", current_count=success_count
+                        )
+                    
             # Flush remaining
             if prompts_buffer:
-                IngestionService._flush_buffer(supabase, prompts_buffer)
+                IngestionService._flush_buffer_with_retry(supabase, prompts_buffer)
                 success_count += len(prompts_buffer)
+            
+            # Mark job complete
+            if job_id:
+                IngestionJobService.complete_job(job_id, success_count)
                 
             return {"status": "success", "processed": success_count}
         except Exception as e:
             logger.error(f"Ingestion Failed: {e}")
+            if job_id:
+                IngestionJobService.fail_job(job_id, str(e))
             return {"status": "error", "message": str(e)}
 
+    @staticmethod
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True
+    )
+    def _flush_buffer_with_retry(supabase, batch: List[Dict[str, Any]]):
+        """
+        Flush buffer to database with exponential backoff retry.
+        Handles temporary database locks or network issues gracefully.
+        """
+        try:
+            supabase.table("prompts").upsert(
+                batch, on_conflict="user_id, content", ignore_duplicates=True
+            ).execute()
+        except Exception as e:
+            logger.warning(f"Upsert attempt failed, will retry: {e}")
+            raise
 
     @staticmethod
     def _flush_buffer(supabase, batch):
-        try:
-            supabase.table("prompts").upsert(
-                 batch, on_conflict="user_id, content", ignore_duplicates=True
-            ).execute()
-        except Exception as e:
-            logger.error(f"Failed to upsert batch: {e}")
+        """Legacy method for backward compatibility."""
+        IngestionService._flush_buffer_with_retry(supabase, batch)
 
 # Maintain backward compatibility if needed, or update consumers
 async def ingest_chatgpt_export(content: bytes, user_id: UUID):
     return await IngestionService.ingest(content, "chatgpt", user_id)
+
