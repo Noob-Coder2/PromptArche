@@ -34,6 +34,16 @@ async def login_page(request: Request):
     })
 
 
+@router.get("/signup", response_class=HTMLResponse)
+async def signup_page(request: Request):
+    """Render the signup page."""
+    return templates.TemplateResponse("signup.html", {
+        "request": request,
+        "supabase_url": settings.SUPABASE_URL,
+        "supabase_key": settings.SUPABASE_KEY
+    })
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_view(request: Request, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Render the dashboard page with user data."""

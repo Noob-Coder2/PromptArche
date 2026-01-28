@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Login - PromptArche{% endblock %}
+{% block title %}Sign Up - PromptArche{% endblock %}
 
 {% block content %}
-<div class="flex min-h-[80vh] items-center justify-center" x-data="loginFunc()">
+<div class="flex min-h-[80vh] items-center justify-center" x-data="signupFunc()">
     <div class="w-full max-w-md bg-slate-900 border border-white/10 rounded-xl p-8 shadow-2xl">
         <h2
             class="text-3xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
-            Enter the Arche
+            Join the Arche
         </h2>
 
-        <form @submit.prevent="handleLogin" class="space-y-6">
+        <form @submit.prevent="handleSignup" class="space-y-6">
             <div>
                 <label for="email" class="block text-sm font-medium text-slate-400">Email</label>
                 <input type="email" x-model="email" required
@@ -19,66 +19,72 @@
 
             <div>
                 <label for="password" class="block text-sm font-medium text-slate-400">Password</label>
-                <input type="password" x-model="password" required
+                <input type="password" x-model="password" required minlength="6"
+                    class="mt-1 block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
+            </div>
+
+            <div>
+                <label for="confirmPassword" class="block text-sm font-medium text-slate-400">Confirm Password</label>
+                <input type="password" x-model="confirmPassword" required minlength="6"
                     class="mt-1 block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
             </div>
 
             <div x-show="errorMessage" class="text-red-500 text-sm" x-text="errorMessage"></div>
+            <div x-show="successMessage" class="text-green-500 text-sm" x-text="successMessage"></div>
 
             <button type="submit" :disabled="loading"
                 class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition">
-                <span x-show="!loading">Sign In</span>
-                <span x-show="loading">Authenticating...</span>
+                <span x-show="!loading">Create Account</span>
+                <span x-show="loading">Creating Account...</span>
             </button>
         </form>
 
         <div class="mt-6 text-center text-sm">
-            <span class="text-slate-400">Don't have an account?</span>
-            <a href="/signup" class="font-medium text-primary hover:text-indigo-400 transition ml-1">Sign up</a>
+            <span class="text-slate-400">Already have an account?</span>
+            <a href="/login" class="font-medium text-primary hover:text-indigo-400 transition ml-1">Sign in</a>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    function loginFunc() {
+    function signupFunc() {
         return {
             email: '',
             password: '',
+            confirmPassword: '',
             loading: false,
             errorMessage: '',
+            successMessage: '',
 
-            async handleLogin() {
+            async handleSignup() {
+                if (this.password !== this.confirmPassword) {
+                    this.errorMessage = "Passwords do not match";
+                    return;
+                }
+
                 this.loading = true;
                 this.errorMessage = '';
-
-                // Initialize Supabase Client (Access keys should be public in frontend for Supabase JS usually, 
-                // but here we might need to inject them or fetch them. 
-                // For MVP, I'll inject via environment variables capable Jinja or just hardcode for demo? 
-                // User said "Private webapp".
-                // I will fetch env vars from a simple endpoint or assume valid keys provided.
-                // Actually, I'll use a fetch to my own backend to login to keep keys hidden if I want, 
-                // BUT Supabase JS pattern uses public anon key.
+                this.successMessage = '';
 
                 try {
-                    // We need the keys. I'll pass them in the template context from main.py
                     const supabaseUrl = "{{ supabase_url }}";
                     const supabaseKey = "{{ supabase_key }}";
                     const _supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-                    const { data, error } = await _supabase.auth.signInWithPassword({
+                    const { data, error } = await _supabase.auth.signUp({
                         email: this.email,
                         password: this.password,
                     });
 
                     if (error) throw error;
 
-                    // Set cookie for FastAPI to read
-                    const accessToken = data.session.access_token;
-                    document.cookie = `access_token=${accessToken}; path=/; max-age=3600; SameSite=Lax`;
+                    this.successMessage = "Account created! Redirecting to login...";
 
-                    // Redirect
-                    window.location.href = "/dashboard";
+                    // Allow user to see success message briefly before redirecting
+                    setTimeout(() => {
+                        window.location.href = "/login";
+                    }, 1500);
 
                 } catch (e) {
                     this.errorMessage = e.message;
