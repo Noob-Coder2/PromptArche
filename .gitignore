@@ -75,3 +75,7 @@ dmypy.json
 # Editors
 .vscode/
 .idea/
+
+
+# Misc
+critique.md

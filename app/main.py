@@ -34,5 +34,8 @@ app = FastAPI(title="PromptArche", lifespan=lifespan)
 # Static & Templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-from app.routers import web
-app.include_router(web.router)
+from app.routers import auth, ingestion, dashboard, pages
+app.include_router(auth.router)
+app.include_router(ingestion.router)
+app.include_router(dashboard.router)
+app.include_router(pages.router)
