@@ -1,7 +1,6 @@
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 import httpx
@@ -58,9 +57,6 @@ app = FastAPI(title="PromptArche", lifespan=lifespan)
 
 # Setup global error handlers
 setup_error_handlers(app)
-
-# Static & Templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 from app.routers import auth, ingestion, dashboard, pages, health
 app.include_router(auth.router)
