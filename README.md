@@ -182,7 +182,3 @@ docker-compose up --build
 ```
 
 ---
-
-## License
-
-MIT

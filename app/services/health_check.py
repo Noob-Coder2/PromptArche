@@ -366,3 +366,65 @@ class HealthCheckService:
                 status=ServiceStatus.DEGRADED,
                 error=str(e)
             )
+    
+    async def check_schema_readiness(self) -> Dict[str, Any]:
+        """
+        Check if all required database tables exist.
+        
+        Returns:
+            Dict with ready status and missing tables
+        """
+        required_tables = [
+            "prompts", 
+            "clusters", 
+            "insights", 
+            "ingestion_jobs",
+            "embedding_cache"
+        ]
+        
+        missing_tables = []
+        
+        try:
+            # Get list of all tables in public schema
+            # Note: This query assumes Postgres structure
+            response = self.supabase.rpc(
+                "get_tables_info", {}
+            ).execute()
+            
+            # Fallback if RPC doesn't exist (which it won't by default):
+            # We'll try to select 1 row from each table. specific error means missing.
+            # This is a bit brute-force but works without admin RPCs.
+            
+            for table in required_tables:
+                try:
+                    # Just check if table exists by selecting nothing
+                    # We limit to 0 so it's super fast, effectively a HEAD request
+                    self.supabase.table(table).select("count", count="exact").limit(0).execute()
+                except Exception as e:
+                    # If table is missing, the error usually contains "relation ... does not exist"
+                    # or similar code 42P01
+                    if "does not exist" in str(e) or "42P01" in str(e) or "not found" in str(e).lower():
+                        missing_tables.append(table)
+                    else:
+                        # Some other error (auth, connection), might be critical
+                        logger.warning(f"Error checking table {table}: {e}")
+                        # We'll assume it exists but is failing for other reasons, 
+                        # or treat as missing if we want to be strict.
+                        # For now, if we can't verify it, let's treat as potentially problematic.
+                        pass
+            
+            is_ready = len(missing_tables) == 0
+            
+            return {
+                "ready": is_ready,
+                "missing_tables": missing_tables,
+                "checked_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Schema check failed: {e}")
+            return {
+                "ready": False,
+                "error": str(e),
+                "missing_tables": required_tables # Assume all missing on critical failure
+            }

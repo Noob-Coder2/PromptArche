@@ -38,6 +38,34 @@ async def lifespan(app: FastAPI):
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
     )
     logger.info("HTTP client initialized")
+    
+    # Startup: Database Pre-flight Check
+    from app.services.health_check import HealthCheckService
+    from app.db.supabase import get_supabase
+    
+    # Default to True so we don't block if check fails catastrophically/timeouts
+    # But ideally strictly False until proven True. Let's go with False for safety.
+    app.state.db_ready = False 
+    app.state.db_missing_tables = []
+    
+    try:
+        supabase = get_supabase()
+        health_service = HealthCheckService(supabase_client=supabase)
+        schema_status = await health_service.check_schema_readiness()
+        
+        app.state.db_ready = schema_status["ready"]
+        app.state.db_missing_tables = schema_status.get("missing_tables", [])
+        
+        if not app.state.db_ready:
+            logger.critical(f"DATABASE NOT READY. Missing tables: {app.state.db_missing_tables}")
+            logger.critical("Run 'app/db/schema.sql' and 'app/db/ingestion_jobs.sql' in Supabase SQL Editor.")
+        else:
+            logger.info("Database schema verification passed.")
+            
+    except Exception as e:
+        logger.error(f"Failed to perform DB pre-flight check: {e}")
+        # Keep db_ready = False
+    
     logger.info(f"Database pooling configured: pool_size={settings.DB_POOL_SIZE}, timeout={settings.DB_POOL_TIMEOUT}s")
     logger.info(f"Async processing: batch_size={settings.BATCH_SIZE}, max_retries={settings.MAX_RETRIES}")
     
@@ -57,6 +85,41 @@ app = FastAPI(title="PromptArche", lifespan=lifespan)
 
 # Setup global error handlers
 setup_error_handlers(app)
+
+# Context Processor to inject DB status into all templates
+@app.middleware("http")
+async def add_global_context(request: Request, call_next):
+    # This is a bit of a hack since FastAPI doesn't have standard context processors like Flask/Django
+    # We rely on the routes manipulating the templates.TemplateResponse to include request.app.state
+    # But we can't easily inject into Jinja env globals dynamically per request in middleware without
+    # touching the templates object.
+    
+    # Better approach: Update Jinja2Templates env globals on startup or update per request
+    # Since state is global, we can just access it in the router or attach to request state
+    request.state.db_ready = getattr(app.state, "db_ready", False)
+    request.state.db_missing_tables = getattr(app.state, "db_missing_tables", [])
+    
+    response = await call_next(request)
+    return response
+
+# Inject the variable into Jinja environment globals so it's available everywhere
+# We do this dynamically in a dependency or just update the templates env once if static.
+# Since it might change (if we implemented a re-check), accessing state is better.
+# For simplicity, we'll patch the template response or adding it to the router's common data.
+# HOWEVER, the cleanest way in FastAPI + Jinja is checking the request.app.state in the template? 
+# No, Jinja can't access app directly.
+# Let's add a context processor helper.
+
+def get_db_status(request: Request):
+    return {
+        "db_ready": getattr(request.app.state, "db_ready", False),
+        "db_missing_tables": getattr(request.app.state, "db_missing_tables", [])
+    }
+
+# Update all template responses is tedious. 
+# Plan B: We already pass 'request' to all templates. 
+# We can just extend the base template to check `request.app.state.db_ready`.
+# FastAPI allows accessing `request.app` inside Jinja if request is passed.
 
 from app.routers import auth, ingestion, dashboard, pages, health
 app.include_router(auth.router)

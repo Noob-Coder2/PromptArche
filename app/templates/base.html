@@ -36,6 +36,16 @@
 
     <!-- Navigation -->
     <nav class="border-b border-white/10 bg-slate-900/50 backdrop-blur-md fixed w-full top-0 z-50">
+        <!-- DB Warning Banner -->
+        {% if request.app.state.db_ready is defined and not request.app.state.db_ready %}
+        <div
+            class="bg-red-600/90 text-white text-center py-2 px-4 text-sm font-semibold backdrop-blur-sm border-b border-red-500">
+            ⚠ CRITICAL: Database schema not configured. Run SQL setup scripts and restart.
+            <span class="opacity-80 font-normal ml-2">Missing tables: {{ request.app.state.db_missing_tables|join(', ')
+                }}</span>
+        </div>
+        {% endif %}
+
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
@@ -54,6 +64,7 @@
                     </div>
                 </div>
                 <div>
+                    <!-- Logout button only if we think we might be logged in, or just always show for simplicity -->
                     <button onclick="document.cookie='access_token=; Max-Age=0; path=/;'; window.location.href='/login'"
                         class="text-sm text-slate-400 hover:text-white transition">Logout</button>
                 </div>

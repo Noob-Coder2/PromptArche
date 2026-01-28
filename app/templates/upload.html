@@ -3,114 +3,267 @@
 {% block title %}Upload - PromptArche{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto space-y-8" x-data="uploadFunc()">
+<div class="max-w-6xl mx-auto space-y-8" x-data="uploadFunc()">
     <header class="text-center">
         <h1 class="text-3xl font-bold text-white">Ingest Your History</h1>
-        <p class="text-slate-400 mt-2">Upload your `conversations.json` from ChatGPT.</p>
+        <p class="text-slate-400 mt-2">Export your conversations and upload them to discover insights.</p>
     </header>
 
-    <div class="bg-slate-900 border border-white/10 rounded-xl p-8 shadow-lg">
-        <!-- Provider Select -->
-        <div class="mb-6">
-            <label class="block text-sm font-medium text-slate-400 mb-2">Source</label>
-            <select x-model="provider"
-                class="block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
-                <option value="chatgpt">ChatGPT (conversations.json)</option>
-                <option value="claude">Claude (json)</option>
-                <option value="gemini">Gemini (json)</option>
-            </select>
-        </div>
-
-        <!-- Dropzone -->
-        <div class="flex justify-center items-center w-full">
-            <label for="dropzone-file"
-                class="flex flex-col justify-center items-center w-full h-64 bg-slate-950 rounded-lg border-2 border-dashed border-slate-600 cursor-pointer hover:bg-slate-800 transition">
-                <div class="flex flex-col justify-center items-center pt-5 pb-6">
-                    <svg class="mb-3 w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
-                        </path>
-                    </svg>
-                    <p class="mb-2 text-sm text-slate-400"><span class="font-semibold">Click to upload</span> or drag
-                        and drop</p>
-                    <p class="text-xs text-slate-500">conversations.json (JSON)</p>
+    <!-- Instructional Cards Section -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <!-- ChatGPT Card -->
+        <div class="bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all hover:border-green-500/50"
+            x-data="{ expanded: false }">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                        <svg class="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path
+                                d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white">ChatGPT</h3>
                 </div>
-                <input id="dropzone-file" type="file" accept=".json" class="hidden" @change="handleFileChange" />
-            </label>
+                <button @click="expanded = !expanded" class="text-slate-400 hover:text-white transition">
+                    <svg class="w-5 h-5 transition-transform" :class="expanded ? 'rotate-180' : ''" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+            </div>
+            <p class="text-sm text-slate-400 mb-3">Export all your ChatGPT conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
+                <div class="flex items-start space-x-2">
+                    <span class="text-green-400 font-bold">1.</span>
+                    <p>Go to <span class="text-green-400">ChatGPT Settings</span> → Data Controls</p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-green-400 font-bold">2.</span>
+                    <p>Click <span class="text-green-400">"Export Data"</span></p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-green-400 font-bold">3.</span>
+                    <p>Wait for email with download link</p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-green-400 font-bold">4.</span>
+                    <p>Extract and upload <code class="bg-slate-950 px-1 rounded">conversations.json</code></p>
+                </div>
+            </div>
         </div>
 
-
-
-        <div x-show="fileName" class="mt-4 text-center text-sm text-primary" x-text="'Selected: ' + fileName"></div>
-
-        <!-- Action Buttons -->
-        <div class="mt-6">
-            <button @click="uploadFile" :disabled="!file || uploading"
-                class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-pink-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition">
-                <span x-show="!uploading">Start Ingestion</span>
-                <span x-show="uploading">Processing...</span>
-            </button>
+        <!-- Claude Card -->
+        <div class="bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all hover:border-orange-500/50"
+            x-data="{ expanded: false }">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                        <svg class="w-6 h-6 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path
+                                d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 2c5.523 0 10 4.477 10 10s-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm-1 4v12l8-6-8-6z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white">Claude</h3>
+                </div>
+                <button @click="expanded = !expanded" class="text-slate-400 hover:text-white transition">
+                    <svg class="w-5 h-5 transition-transform" :class="expanded ? 'rotate-180' : ''" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+            </div>
+            <p class="text-sm text-slate-400 mb-3">Export Claude conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
+                <div class="flex items-start space-x-2">
+                    <span class="text-orange-400 font-bold">1.</span>
+                    <p>Open any conversation in Claude</p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-orange-400 font-bold">2.</span>
+                    <p>Click the <span class="text-orange-400">three dots menu</span> (⋯)</p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-orange-400 font-bold">3.</span>
+                    <p>Select <span class="text-orange-400">"Export conversation"</span></p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-orange-400 font-bold">4.</span>
+                    <p>Download the <code class="bg-slate-950 px-1 rounded">.json</code> file and upload it here</p>
+                </div>
+                <div class="mt-3 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs">
+                    <strong>Note:</strong> Export each conversation individually
+                </div>
+            </div>
         </div>
 
-        <!-- Status -->
-        <div x-show="statusMessage"
-            :class="{'text-green-400': statusType === 'success', 'text-red-400': statusType === 'error'}"
-            class="mt-4 text-center text-sm font-medium" x-text="statusMessage">
+        <!-- Grok Card -->
+        <div class="bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all hover:border-blue-500/50"
+            x-data="{ expanded: false }">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <svg class="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path
+                                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white">Grok</h3>
+                </div>
+                <button @click="expanded = !expanded" class="text-slate-400 hover:text-white transition">
+                    <svg class="w-5 h-5 transition-transform" :class="expanded ? 'rotate-180' : ''" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+            </div>
+            <p class="text-sm text-slate-400 mb-3">Export Grok conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
+                <div class="flex items-start space-x-2">
+                    <span class="text-blue-400 font-bold">1.</span>
+                    <p>Navigate to your Grok conversation</p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-blue-400 font-bold">2.</span>
+                    <p>Click the <span class="text-blue-400">share/export button</span></p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-blue-400 font-bold">3.</span>
+                    <p>Select <span class="text-blue-400">"Export as JSON"</span></p>
+                </div>
+                <div class="flex items-start space-x-2">
+                    <span class="text-blue-400 font-bold">4.</span>
+                    <p>Upload the downloaded <code class="bg-slate-950 px-1 rounded">.json</code> file</p>
+                </div>
+                <div class="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs">
+                    <strong>Note:</strong> Grok export format may vary
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<script>
-    function uploadFunc() {
-        return {
-            file: null,
-            fileName: '',
-            provider: 'chatgpt',
-            uploading: false,
-            statusMessage: '',
-            statusType: 'success',
+    <!-- Upload Form -->
+    <div class="max-w-2xl mx-auto">
+        <div class="bg-slate-900 border border-white/10 rounded-xl p-8 shadow-lg">
+            <!-- Provider Select -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-slate-400 mb-2">Source</label>
+                <select x-model="provider"
+                    class="block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
+                    <option value="chatgpt">ChatGPT (conversations.json)</option>
+                    <option value="claude">Claude (json)</option>
+                    <option value="gemini">Gemini (json)</option>
+                </select>
+            </div>
 
-            handleFileChange(event) {
-                const file = event.target.files[0];
-                if (file) {
-                    this.file = file;
-                    this.fileName = file.name;
-                    this.statusMessage = '';
-                }
-            },
+            <!-- Dropzone -->
+            <div class="flex justify-center items-center w-full">
+                <label for="dropzone-file"
+                    class="flex flex-col justify-center items-center w-full h-64 bg-slate-950 rounded-lg border-2 border-dashed border-slate-600 cursor-pointer hover:bg-slate-800 transition">
+                    <div class="flex flex-col justify-center items-center pt-5 pb-6">
+                        <svg class="mb-3 w-10 h-10 text-slate-400" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                            </path>
+                        </svg>
+                        <p class="mb-2 text-sm text-slate-400"><span class="font-semibold">Click to upload</span> or
+                            drag
+                            and drop</p>
+                        <p class="text-xs text-slate-500">conversations.json (JSON)</p>
+                    </div>
+                    <input id="dropzone-file" type="file" accept=".json" class="hidden" @change="handleFileChange" />
+                </label>
+            </div>
 
-            async uploadFile() {
-                if (!this.file) return;
 
-                this.uploading = true;
-                const formData = new FormData();
-                formData.append('file', this.file);
-                formData.append('provider', this.provider);
 
-                try {
-                    // We need to send the Auth token. Check cookie.
-                    // If we use standard fetch, cookies are sent automatically to same-origin.
-                    const response = await fetch('/api/ingest', {
-                        method: 'POST',
-                        body: formData
-                    });
+            <div x-show="fileName" class="mt-4 text-center text-sm text-primary" x-text="'Selected: ' + fileName"></div>
 
-                    const result = await response.json();
+            <!-- Action Buttons -->
+            <div class="mt-6">
+                {% if request.app.state.db_ready is defined and not request.app.state.db_ready %}
+                <div class="mb-4 bg-red-500/10 border border-red-500/50 rounded-lg p-4 flex items-center gap-3">
+                    <svg class="w-6 h-6 text-red-500 flex-shrink-0" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div class="text-sm text-red-200">
+                        <span class="font-bold">Database Locked:</span> Ingestion is disabled because the database
+                        structure is incomplete. Please check the banner above.
+                    </div>
+                </div>
+                <button disabled
+                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-slate-400 bg-slate-800 cursor-not-allowed opacity-75">
+                    Ingestion Disabled
+                </button>
+                {% else %}
+                <button @click="uploadFile" :disabled="!file || uploading"
+                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-pink-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition">
+                    <span x-show="!uploading">Start Ingestion</span>
+                    <span x-show="uploading">Processing...</span>
+                </button>
+                {% endif %}
+            </div>
 
-                    if (response.ok) {
-                        this.statusType = 'success';
-                        this.statusMessage = `Success! ${result.processed || 0} prompts queued.`;
-                    } else {
-                        throw new Error(result.detail || 'Upload failed');
+            <!-- Status -->
+            <div x-show="statusMessage"
+                :class="{'text-green-400': statusType === 'success', 'text-red-400': statusType === 'error'}"
+                class="mt-4 text-center text-sm font-medium" x-text="statusMessage">
+            </div>
+        </div>
+
+        <script>
+            function uploadFunc() {
+                return {
+                    file: null,
+                    fileName: '',
+                    provider: 'chatgpt',
+                    uploading: false,
+                    statusMessage: '',
+                    statusType: 'success',
+
+                    handleFileChange(event) {
+                        const file = event.target.files[0];
+                        if (file) {
+                            this.file = file;
+                            this.fileName = file.name;
+                            this.statusMessage = '';
+                        }
+                    },
+
+                    async uploadFile() {
+                        if (!this.file) return;
+
+                        this.uploading = true;
+                        const formData = new FormData();
+                        formData.append('file', this.file);
+                        formData.append('provider', this.provider);
+
+                        try {
+                            // We need to send the Auth token. Check cookie.
+                            // If we use standard fetch, cookies are sent automatically to same-origin.
+                            const response = await fetch('/api/ingest', {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            const result = await response.json();
+
+                            if (response.ok) {
+                                this.statusType = 'success';
+                                this.statusMessage = `Success! ${result.processed || 0} prompts queued.`;
+                            } else {
+                                throw new Error(result.detail || 'Upload failed');
+                            }
+                        } catch (e) {
+                            this.statusType = 'error';
+                            this.statusMessage = e.message;
+                        } finally {
+                            this.uploading = false;
+                        }
                     }
-                } catch (e) {
-                    this.statusType = 'error';
-                    this.statusMessage = e.message;
-                } finally {
-                    this.uploading = false;
                 }
             }
-        }
-    }
-</script>
-{% endblock %}
+        </script>
+        {% endblock %}
