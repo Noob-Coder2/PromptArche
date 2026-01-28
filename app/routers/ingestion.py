@@ -1,27 +1,50 @@
 """
 Ingestion router for handling file upload and job management API endpoints.
+Uses async task queue for non-blocking background processing.
 """
 
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
+import asyncio
 from app.core.security import get_current_user_id
+from app.core.validators import validate_file_size, validate_file_type, validate_json_structure, validate_provider
+from app.core.rate_limiter import rate_limit
 from app.services.ingestion import IngestionService
 from app.services.job_service import IngestionJobService
+from app.services.task_queue import TaskQueueService
 
 router = APIRouter()
 
 
 @router.post("/api/ingest")
 async def ingest_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     provider: str = Form("chatgpt"),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    _: None = Depends(rate_limit)
 ):
     """
-    Start file ingestion in the background.
-    Returns a job ID for progress tracking.
+    Start file ingestion in the background using async task queue.
+    Returns immediately with a job ID for progress tracking.
+    
+    The file is processed asynchronously without blocking other users.
+    Progress can be tracked via GET /api/jobs/{job_id}
     """
+    # Input validation
+    try:
+        validate_file_size(file)
+        validate_file_type(file)
+        validate_provider(provider)
+        validate_json_structure(file, provider)  # This will also reset file pointer
+    except HTTPException:
+        # Re-raise validation errors
+        raise
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Validation failed: {str(e)}"},
+            status_code=400
+        )
+    
     try:
         # Save upload to temp file using service utility
         file_path = IngestionService.save_upload_to_temp(file)
@@ -31,9 +54,9 @@ async def ingest_file(
             status_code=500
         )
     
-    # Create job for tracking
+    # Create job for tracking (with temp file path for recovery)
     try:
-        job_id = IngestionJobService.create_job(user_id, provider)
+        job_id = IngestionJobService.create_job(user_id, provider, temp_file_path=file_path)
     except Exception as e:
         IngestionService.cleanup_temp_file(file_path)
         return JSONResponse(
@@ -41,20 +64,33 @@ async def ingest_file(
             status_code=500
         )
     
-    # Add background task
-    background_tasks.add_task(
-        process_upload_background,
-        file_path,
-        provider,
-        user_id,
-        job_id
-    )
+    # Enqueue async task (non-blocking)
+    try:
+        await TaskQueueService.enqueue_job(
+            job_id=job_id,
+            job_type="ingest_file",
+            job_data={
+                "file_path": file_path,
+                "provider": provider
+            },
+            user_id=user_id
+        )
+    except Exception as e:
+        IngestionJobService.fail_job(job_id, f"Failed to enqueue task: {str(e)}")
+        return JSONResponse(
+            {"status": "error", "message": "Failed to enqueue job"},
+            status_code=500
+        )
     
-    return {"status": "success", "message": "Ingestion started", "job_id": job_id}
+    return {
+        "status": "success",
+        "message": "Ingestion started (processing in background)",
+        "job_id": job_id
+    }
 
 
 @router.get("/api/jobs/{job_id}")
-async def get_job_status(job_id: str, user_id: str = Depends(get_current_user_id)):
+async def get_job_status(job_id: str, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """
     Get the current status of an ingestion job.
     Used by frontend to poll for progress.
@@ -80,19 +116,26 @@ async def get_job_status(job_id: str, user_id: str = Depends(get_current_user_id
 
 
 @router.get("/api/jobs")
-async def get_user_jobs(user_id: str = Depends(get_current_user_id)):
+async def get_user_jobs(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Get recent ingestion jobs for the current user."""
     jobs = IngestionJobService.get_user_jobs(user_id, limit=10)
     return {"jobs": jobs}
 
 
 @router.get("/api/jobs/active")
-async def get_active_job(user_id: str = Depends(get_current_user_id)):
+async def get_active_job(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Get the currently active ingestion job, if any."""
     job = IngestionJobService.get_active_job(user_id)
     if job:
         return {"active": True, "job": job}
     return {"active": False, "job": None}
+
+
+@router.get("/api/jobs/stats")
+async def get_queue_stats(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
+    """Get task queue statistics (queue size, active tasks)."""
+    stats = await TaskQueueService.get_queue_stats()
+    return stats
 
 
 def process_upload_background(
@@ -102,7 +145,11 @@ def process_upload_background(
     job_id: str
 ):
     """
-    Background task for processing uploaded files.
+    DEPRECATED: Legacy synchronous background task.
+    
+    This function is kept for backward compatibility but should not be used.
+    Use TaskQueueService.enqueue_job() instead for async processing.
+    
     Uses IngestionService for parsing and database operations.
     """
     try:

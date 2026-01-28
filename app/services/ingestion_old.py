@@ -7,7 +7,6 @@ import warnings
 import tempfile
 import shutil
 import os
-import asyncio
 from typing import List, Dict, Any, Generator, IO, Optional, Tuple
 from datetime import datetime
 from uuid import UUID
@@ -120,8 +119,6 @@ class IngestionService:
     """
     Service for handling file ingestion with streaming, progress tracking, and transaction management.
     Designed to handle large files (multi-GB) without memory exhaustion.
-    
-    NEW: Batch embedding generation during ingestion (50-100x faster than sequential).
     """
     
     # --- File Handling Utilities ---
@@ -176,7 +173,6 @@ class IngestionService:
         
         Features:
         - Streaming parser for memory efficiency
-        - Batch embedding generation (50-100x faster!)
         - Batch processing to prevent connection exhaustion
         - Retry logic with exponential backoff
         - Transaction rollback on failure
@@ -264,7 +260,7 @@ class IngestionService:
                     logger.error(f"Failed to flush final batch {batch_num}: {e}")
                     failed_batch_ids.append(batch_num)
             
-            # If there were failed batches, log and attempt recovery
+            # If there were failed batches, attempt cleanup/rollback
             if failed_batch_ids:
                 logger.warning(
                     f"Ingestion partially failed: {len(failed_batch_ids)} batch(es) failed. "
@@ -331,72 +327,165 @@ class IngestionService:
             raise
 
     @staticmethod
-    def _flush_buffer_with_embeddings(
+    def _flush_buffer(supabase, batch):
+        """Legacy method for backward compatibility."""
+        IngestionService._flush_buffer_with_retry(supabase, batch)
+
+# Maintain backward compatibility if needed, or update consumers
+async def ingest_chatgpt_export(content: bytes, user_id: UUID):
+    return await IngestionService.ingest(content, "chatgpt", user_id)
+
+
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.debug(f"Cleaned up temp file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file {file_path}: {e}")
+    
+    # --- Ingestion Methods ---
+    @staticmethod
+    def ingest_sync(
+        file_obj: IO,
+        provider: str,
+        user_id: str,
+        job_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Synchronous ingestion to be run in a thread pool.
+        Accepts a file-like object (bytes stream).
+        
+        Args:
+            file_obj: File-like object to parse
+            provider: Data provider (chatgpt, claude, gemini)
+            user_id: User's UUID string
+            job_id: Optional job ID for progress tracking
+        """
+        from app.services.job_service import IngestionJobService
+        
+        parser_map = {
+            "chatgpt": ChatGPTParser(),
+            "claude": ClaudeParser(),
+            "gemini": GeminiParser()
+        }
+        
+        parser = parser_map.get(provider)
+        if not parser:
+            if job_id:
+                IngestionJobService.fail_job(job_id, f"Unknown provider: {provider}")
+            return {"status": "error", "message": f"Unknown provider: {provider}"}
+        
+        # Update job status
+        if job_id:
+            IngestionJobService.update_progress(job_id, "PARSING")
+            
+        prompts_buffer = []
+        success_count = 0
+        supabase = get_supabase()
+        
+        try:
+            # Generator based processing
+            for parsed_item in parser.parse(file_obj):
+                parsed_item["user_id"] = str(user_id)
+                prompts_buffer.append(parsed_item)
+                
+                if len(prompts_buffer) >= 100:
+                    IngestionService._flush_buffer_with_retry(supabase, prompts_buffer)
+                    success_count += len(prompts_buffer)
+                    prompts_buffer = []
+                    
+                    # Update progress
+                    if job_id:
+                        IngestionJobService.update_progress(
+                            job_id, "PARSING", current_count=success_count
+                        )
+                    
+            # Flush remaining
+            if prompts_buffer:
+                batch_num += 1
+                batch_count = len(prompts_buffer)
+                
+                try:
+                    IngestionService._flush_buffer_with_retry(
+                        supabase, prompts_buffer, batch_num
+                    )
+                    success_count += batch_count
+                    logger.info(f"Batch {batch_num} (final): Inserted {batch_count} items")
+                except Exception as e:
+                    logger.error(f"Failed to flush final batch {batch_num}: {e}")
+                    failed_batch_ids.append(batch_num)
+            
+            # If there were failed batches, attempt cleanup/rollback
+            if failed_batch_ids:
+                logger.warning(
+                    f"Ingestion partially failed: {len(failed_batch_ids)} batch(es) failed. "
+                    f"Processed {success_count} items before failure."
+                )
+                if job_id:
+                    error_msg = f"Partial ingestion: {success_count} items processed, " \
+                                f"but {len(failed_batch_ids)} batch(es) failed"
+                    IngestionJobService.fail_job(job_id, error_msg)
+                return {
+                    "status": "partial_failure",
+                    "processed": success_count,
+                    "failed_batches": failed_batch_ids
+                }
+            
+            # Mark job complete
+            if job_id:
+                IngestionJobService.complete_job(job_id, success_count)
+            
+            logger.info(f"Ingestion completed: {success_count} items processed in {batch_num} batches")
+            return {"status": "success", "processed": success_count}
+            
+        except Exception as e:
+            logger.error(f"Ingestion failed with exception: {e}", exc_info=True)
+            if job_id:
+                IngestionJobService.fail_job(
+                    job_id, 
+                    f"Ingestion error: {str(e)}"
+                )
+            return {"status": "error", "message": str(e)}
+
+    @staticmethod
+    @retry(
+        stop=stop_after_attempt(settings.MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        reraise=True
+    )
+    def _flush_buffer_with_retry(
         supabase,
         batch: List[Dict[str, Any]],
         batch_num: Optional[int] = None
     ):
         """
-        Flush buffer to database WITH BATCH EMBEDDING GENERATION.
-        
-        Optimization: Uses batch embedding API instead of sequential calls.
-        This is 50-100x faster for typical datasets.
-        
-        Flow:
-        1. Extract content from each prompt
-        2. Call HF API with batch (e.g., 32 items in 1 API call)
-        3. Match embeddings back to prompts
-        4. Store with embeddings in database
-        
-        Cache Strategy:
-        - Check cache first for each text (30-50% hit rate typical)
-        - Only call API for uncached items
-        - Store results in both memory cache and database
+        Flush buffer to database with exponential backoff retry.
+        Handles temporary database locks or network issues gracefully.
         
         Args:
-            supabase: Supabase client instance
-            batch: List of prompt dictionaries to insert (must have 'content' field)
+            supabase: Supabase client instance (uses connection pool)
+            batch: List of prompt dictionaries to insert
             batch_num: Optional batch number for logging
+            
+        Raises:
+            Exception: If all retry attempts fail
         """
         try:
-            # Extract content for embedding
-            texts = [item["content"] for item in batch]
-            
-            # Get embeddings in batch (with caching)
-            # This runs synchronously but internally uses async for concurrency
-            embeddings = asyncio.run(_get_embeddings_batch(texts))
-            
-            # Attach embeddings to items
-            for i, item in enumerate(batch):
-                if i < len(embeddings) and embeddings[i] is not None:
-                    item["embedding"] = embeddings[i]
-                else:
-                    logger.warning(f"Failed to get embedding for item {i}, storing without embedding")
-            
-            # Insert with embeddings
-            IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
-            
+            supabase.table("prompts").upsert(
+                batch, on_conflict="user_id, content", ignore_duplicates=True
+            ).execute()
+            if batch_num:
+                logger.debug(f"Successfully flushed batch {batch_num} with {len(batch)} items")
         except Exception as e:
             batch_info = f" (batch {batch_num})" if batch_num else ""
-            logger.error(f"Embedding batch generation failed{batch_info}: {e}")
-            # Fall back to inserting without embeddings
-            try:
-                IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
-                logger.info(f"Batch {batch_num} inserted without embeddings (fallback)")
-            except Exception as fallback_e:
-                logger.error(f"Fallback flush also failed: {fallback_e}")
-                raise
+            logger.warning(f"Upsert attempt failed{batch_info}, will retry: {e}")
+            raise
 
     @staticmethod
     def _flush_buffer(supabase, batch):
         """Legacy method for backward compatibility."""
         IngestionService._flush_buffer_with_retry(supabase, batch)
 
-
-# Helper function to run async embeddings from sync context
-async def _get_embeddings_batch(texts: List[str]) -> List[Optional[List[float]]]:
-    """
-    Helper function to get embeddings for a batch of texts.
-    Uses the caching service with intelligent batching.
-    """
-    return await get_cached_embeddings_batch(texts)
+# Maintain backward compatibility if needed, or update consumers
+async def ingest_chatgpt_export(content: bytes, user_id: UUID):
+    return await IngestionService.ingest(content, "chatgpt", user_id)

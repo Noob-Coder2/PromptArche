@@ -2,22 +2,23 @@
 Dashboard router for handling dashboard statistics and data API endpoints.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from app.core.security import get_current_user_id
+from app.core.rate_limiter import rate_limit
 from app.db.supabase import get_supabase
 
 router = APIRouter()
 
 
 @router.get("/api/dashboard/stats")
-async def get_dashboard_stats(user_id: str = Depends(get_current_user_id)):
+async def get_dashboard_stats(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Get dashboard statistics for the current user."""
     supabase = get_supabase()
     
     # Fetch Stats
-    prompts_count = supabase.table("prompts").select("id", count="exact").eq("user_id", user_id).execute().count
-    clusters_count = supabase.table("clusters").select("id", count="exact").eq("user_id", user_id).execute().count
-    insights_count = supabase.table("insights").select("id", count="exact").eq("user_id", user_id).execute().count
+    prompts_count = supabase.table("prompts").select("id", count="exact").eq("user_id", user_id).execute().count  # pyright: ignore[reportAttributeAccessIssue]
+    clusters_count = supabase.table("clusters").select("id", count="exact").eq("user_id", user_id).execute().count # pyright: ignore[reportAttributeAccessIssue]
+    insights_count = supabase.table("insights").select("id", count="exact").eq("user_id", user_id).execute().count # pyright: ignore[reportAttributeAccessIssue]
     
     stats = {
         "total_prompts": prompts_count or 0,
@@ -29,7 +30,7 @@ async def get_dashboard_stats(user_id: str = Depends(get_current_user_id)):
 
 
 @router.get("/api/dashboard/clusters")
-async def get_user_clusters(user_id: str = Depends(get_current_user_id)):
+async def get_user_clusters(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Get all clusters for the current user."""
     supabase = get_supabase()
     
@@ -38,7 +39,7 @@ async def get_user_clusters(user_id: str = Depends(get_current_user_id)):
 
 
 @router.get("/api/dashboard/timeline")
-async def get_timeline_data(user_id: str = Depends(get_current_user_id)):
+async def get_timeline_data(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Get timeline data for charting."""
     supabase = get_supabase()
     

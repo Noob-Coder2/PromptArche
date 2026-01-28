@@ -10,6 +10,7 @@ import umap
 import hdbscan
 from sklearn.metrics.pairwise import cosine_similarity
 from app.db.supabase import get_supabase
+from app.services.adaptive_clustering import get_adaptive_parameters, validate_clustering_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,37 @@ def run_clustering_for_user(user_id: UUID) -> Dict[str, Any]:
     )
     embedding_reduced = reducer.fit_transform(embeddings)
     
-    # 3. HDBSCAN - Clustering
+    # 3. Adaptive HDBSCAN - Clustering with data-driven parameters
+    # Select parameters based on dataset characteristics
+    params = get_adaptive_parameters(embedding_reduced, embeddings)
+    
+    logger.info(
+        f"Using adaptive clustering parameters: "
+        f"min_cluster_size={params.min_cluster_size}, "
+        f"min_samples={params.min_samples}, "
+        f"method={params.cluster_selection_method}"
+    )
+    logger.info(f"Justification: {params.justification}")
+    
+    # Validate parameters before use
+    validation = validate_clustering_parameters(
+        params.min_cluster_size,
+        params.min_samples,
+        n_samples
+    )
+    
+    if not validation["is_valid"]:
+        logger.warning(f"Parameter validation failed: {validation['issues']}")
+        logger.warning(f"Using corrected parameters: {validation['corrected_params']}")
+        params.min_cluster_size = validation["corrected_params"]["min_cluster_size"]
+        params.min_samples = validation["corrected_params"]["min_samples"]
+    
     clusterer = hdbscan.HDBSCAN(
-        min_cluster_size=3,
-        min_samples=2,
+        min_cluster_size=params.min_cluster_size,
+        min_samples=params.min_samples,
         metric='euclidean',
-        cluster_selection_method='eom'
+        cluster_selection_method=params.cluster_selection_method,
+        prediction_data=params.prediction_data
     )
     cluster_labels = clusterer.fit_predict(embedding_reduced)
     

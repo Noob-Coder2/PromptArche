@@ -45,6 +45,17 @@ create table if not exists insights (
 create index if not exists idx_insights_cluster_id on insights(cluster_id);
 
 
+-- Embedding Cache Table (NEW)
+-- Stores embeddings for duplicate detection and caching
+create table if not exists embedding_cache (
+  text_hash varchar(64) primary key,
+  embedding vector(1024),
+  created_at timestamptz default now()
+);
+
+-- Index for cache lookups
+create index if not exists idx_embedding_cache_hash on embedding_cache(text_hash);
+
 -- Add Foreign Key to prompts for clusters
 alter table prompts 
 add constraint fk_cluster 

@@ -2,16 +2,17 @@
 Authentication router for handling login/logout API endpoints.
 """
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, Request
 from fastapi.responses import JSONResponse
 from app.core.security import get_current_user_id
 from app.core.config import settings
+from app.core.rate_limiter import rate_limit
 
 router = APIRouter()
 
 
 @router.post("/api/login")
-async def api_login(response: Response, access_token: str):
+async def api_login(response: Response, access_token: str, request: Request, rate_limit_dep: bool = Depends(rate_limit)):
     """
     Set HTTP-only cookie for authentication.
     Token is validated by Supabase client-side before this call.
@@ -21,7 +22,7 @@ async def api_login(response: Response, access_token: str):
         value=access_token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set to True in production with HTTPS
+        secure=settings.COOKIE_SECURE,  # Configurable based on HTTPS
         max_age=3600 * 24  # 1 day
     )
     return {"status": "success"}

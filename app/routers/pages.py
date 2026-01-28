@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.core.security import get_current_user_id, get_optional_user
+from app.core.rate_limiter import rate_limit
 from app.core.config import settings
 from app.routers.dashboard import get_dashboard_stats, get_user_clusters, get_timeline_data
 
@@ -34,7 +35,7 @@ async def login_page(request: Request):
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_view(request: Request, user_id: str = Depends(get_current_user_id)):
+async def dashboard_view(request: Request, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Render the dashboard page with user data."""
     # Get dashboard data
     stats = await get_dashboard_stats(user_id)
@@ -50,7 +51,7 @@ async def dashboard_view(request: Request, user_id: str = Depends(get_current_us
 
 
 @router.get("/upload", response_class=HTMLResponse)
-async def upload_view(request: Request, user_id: str = Depends(get_current_user_id)):
+async def upload_view(request: Request, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """Render the upload page."""
     return templates.TemplateResponse("upload.html", {"request": request})
 
