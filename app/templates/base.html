@@ -35,7 +35,7 @@
 <body class="h-full text-slate-200 antialiased font-sans">
 
     <!-- Navigation -->
-    <nav class="border-b border-white/10 bg-slate-900/50 backdrop-blur-md fixed w-full top-0 z-50">
+    <nav class="border-b border-white/10 bg-slate-900/50 backdrop-blur-md fixed w-full top-0 z-50" x-data="{ isAuthenticated: !!document.cookie.split('; ').find(row => row.startsWith('access_token=')) }">
         <!-- DB Warning Banner -->
         {% if request.app.state.db_ready is defined and not request.app.state.db_ready %}
         <div
@@ -50,38 +50,38 @@
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
                     <a href="/"
-                        class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+                        class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
                         PromptArche
                     </a>
                 </div>
-                <!-- Simple Auth Links (Conditional would need user context) -->
-                <div class="hidden md:block">
-                    <div class="ml-10 flex items-baseline space-x-4">
+                <!-- Navigation Links (Only show when authenticated) -->
+                <div class="hidden md:block" x-show="isAuthenticated">
+                    <div class="ml-10 flex items-baseline space-x-6">
                         <a href="/dashboard"
-                            class="hover:bg-white/10 px-3 py-2 rounded-md text-sm font-medium transition">Dashboard</a>
+                            class="text-base hover:bg-white/10 px-4 py-2 rounded-md font-medium transition">Dashboard</a>
                         <a href="/upload"
-                            class="hover:bg-white/10 px-3 py-2 rounded-md text-sm font-medium transition">Upload</a>
+                            class="text-base hover:bg-white/10 px-4 py-2 rounded-md font-medium transition">Upload</a>
                     </div>
                 </div>
                 <div>
-                    <!-- Logout button only if we think we might be logged in, or just always show for simplicity -->
-                    <button onclick="document.cookie='access_token=; Max-Age=0; path=/;'; window.location.href='/login'"
-                        class="text-sm text-slate-400 hover:text-white transition">Logout</button>
+                    <!-- Logout button only visible when authenticated -->
+                    <button x-show="isAuthenticated" onclick="document.cookie='access_token=; Max-Age=0; path=/;'; window.location.href='/login'"
+                        class="text-base text-slate-300 hover:text-white transition font-medium">Logout</button>
                 </div>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <main class="pt-20 min-h-screen">
-        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+    <main class="pt-20 min-h-screen pb-8">
+        <div class="max-w-7xl mx-auto py-8 sm:px-6 lg:px-8">
             {% block content %}{% endblock %}
         </div>
     </main>
 
     <!-- Footer -->
-    <footer class="border-t border-white/10 bg-slate-950 py-6 mt-12">
-        <div class="text-center text-slate-500 text-sm">
+    <footer class="border-t border-white/10 bg-slate-950 py-8 mt-16">
+        <div class="text-center text-slate-400 text-base">
             &copy; 2024 PromptArche. Brutally Honest Insights.
         </div>
     </footer>

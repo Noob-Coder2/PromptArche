@@ -3,14 +3,14 @@
 {% block title %}Upload - PromptArche{% endblock %}
 
 {% block content %}
-<div class="max-w-6xl mx-auto space-y-8" x-data="uploadFunc()">
+<div class="max-w-6xl mx-auto space-y-10" x-data="uploadFunc()">
     <header class="text-center">
-        <h1 class="text-3xl font-bold text-white">Ingest Your History</h1>
-        <p class="text-slate-400 mt-2">Export your conversations and upload them to discover insights.</p>
+        <h1 class="text-4xl font-bold text-white mb-3">Ingest Your History</h1>
+        <p class="text-lg text-slate-400">Export your conversations and upload them to discover insights.</p>
     </header>
 
     <!-- Instructional Cards Section -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         <!-- ChatGPT Card -->
         <div class="bg-gradient-to-br from-slate-900 to-slate-800 border border-white/10 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all hover:border-green-500/50"
             x-data="{ expanded: false }">
@@ -31,23 +31,23 @@
                     </svg>
                 </button>
             </div>
-            <p class="text-sm text-slate-400 mb-3">Export all your ChatGPT conversations</p>
-            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
-                <div class="flex items-start space-x-2">
-                    <span class="text-green-400 font-bold">1.</span>
+            <p class="text-base text-slate-400 mb-3">Export all your ChatGPT conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-3 text-base text-slate-300">
+                <div class="flex items-start space-x-3">
+                    <span class="text-green-400 font-bold text-lg">1.</span>
                     <p>Go to <span class="text-green-400">ChatGPT Settings</span> → Data Controls</p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-green-400 font-bold">2.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-green-400 font-bold text-lg">2.</span>
                     <p>Click <span class="text-green-400">"Export Data"</span></p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-green-400 font-bold">3.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-green-400 font-bold text-lg">3.</span>
                     <p>Wait for email with download link</p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-green-400 font-bold">4.</span>
-                    <p>Extract and upload <code class="bg-slate-950 px-1 rounded">conversations.json</code></p>
+                <div class="flex items-start space-x-3">
+                    <span class="text-green-400 font-bold text-lg">4.</span>
+                    <p>Extract and upload <code class="bg-slate-950 px-2 py-1 rounded text-sm">conversations.json</code></p>
                 </div>
             </div>
         </div>
@@ -72,25 +72,25 @@
                     </svg>
                 </button>
             </div>
-            <p class="text-sm text-slate-400 mb-3">Export Claude conversations</p>
-            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
-                <div class="flex items-start space-x-2">
-                    <span class="text-orange-400 font-bold">1.</span>
+            <p class="text-base text-slate-400 mb-3">Export Claude conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-3 text-base text-slate-300">
+                <div class="flex items-start space-x-3">
+                    <span class="text-orange-400 font-bold text-lg">1.</span>
                     <p>Open any conversation in Claude</p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-orange-400 font-bold">2.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-orange-400 font-bold text-lg">2.</span>
                     <p>Click the <span class="text-orange-400">three dots menu</span> (⋯)</p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-orange-400 font-bold">3.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-orange-400 font-bold text-lg">3.</span>
                     <p>Select <span class="text-orange-400">"Export conversation"</span></p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-orange-400 font-bold">4.</span>
-                    <p>Download the <code class="bg-slate-950 px-1 rounded">.json</code> file and upload it here</p>
+                <div class="flex items-start space-x-3">
+                    <span class="text-orange-400 font-bold text-lg">4.</span>
+                    <p>Download the <code class="bg-slate-950 px-2 py-1 rounded text-sm">.json</code> file and upload it here</p>
                 </div>
-                <div class="mt-3 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs">
+                <div class="mt-3 p-3 bg-orange-500/10 border border-orange-500/20 rounded text-sm">
                     <strong>Note:</strong> Export each conversation individually
                 </div>
             </div>
@@ -116,25 +116,25 @@
                     </svg>
                 </button>
             </div>
-            <p class="text-sm text-slate-400 mb-3">Export Grok conversations</p>
-            <div x-show="expanded" x-collapse class="space-y-2 text-sm text-slate-300">
-                <div class="flex items-start space-x-2">
-                    <span class="text-blue-400 font-bold">1.</span>
+            <p class="text-base text-slate-400 mb-3">Export Grok conversations</p>
+            <div x-show="expanded" x-collapse class="space-y-3 text-base text-slate-300">
+                <div class="flex items-start space-x-3">
+                    <span class="text-blue-400 font-bold text-lg">1.</span>
                     <p>Navigate to your Grok conversation</p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-blue-400 font-bold">2.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-blue-400 font-bold text-lg">2.</span>
                     <p>Click the <span class="text-blue-400">share/export button</span></p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-blue-400 font-bold">3.</span>
+                <div class="flex items-start space-x-3">
+                    <span class="text-blue-400 font-bold text-lg">3.</span>
                     <p>Select <span class="text-blue-400">"Export as JSON"</span></p>
                 </div>
-                <div class="flex items-start space-x-2">
-                    <span class="text-blue-400 font-bold">4.</span>
-                    <p>Upload the downloaded <code class="bg-slate-950 px-1 rounded">.json</code> file</p>
+                <div class="flex items-start space-x-3">
+                    <span class="text-blue-400 font-bold text-lg">4.</span>
+                    <p>Upload the downloaded <code class="bg-slate-950 px-2 py-1 rounded text-sm">.json</code> file</p>
                 </div>
-                <div class="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs">
+                <div class="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded text-sm">
                     <strong>Note:</strong> Grok export format may vary
                 </div>
             </div>
@@ -143,12 +143,12 @@
 
     <!-- Upload Form -->
     <div class="max-w-2xl mx-auto">
-        <div class="bg-slate-900 border border-white/10 rounded-xl p-8 shadow-lg">
+        <div class="bg-slate-900 border border-white/10 rounded-xl p-10 shadow-lg">
             <!-- Provider Select -->
-            <div class="mb-6">
-                <label class="block text-sm font-medium text-slate-400 mb-2">Source</label>
+            <div class="mb-8">
+                <label class="block text-base font-semibold text-slate-300 mb-3">Source</label>
                 <select x-model="provider"
-                    class="block w-full rounded-md bg-slate-950 border-white/10 text-white focus:border-primary focus:ring-primary sm:text-sm px-4 py-2">
+                    class="block w-full rounded-lg bg-slate-950 border border-white/10 text-white text-base focus:border-primary focus:ring-2 focus:ring-primary focus:ring-opacity-50 px-4 py-3 transition">
                     <option value="chatgpt">ChatGPT (conversations.json)</option>
                     <option value="claude">Claude (json)</option>
                     <option value="gemini">Gemini (json)</option>
@@ -156,50 +156,48 @@
             </div>
 
             <!-- Dropzone -->
-            <div class="flex justify-center items-center w-full">
+            <div class="flex justify-center items-center w-full mb-8">
                 <label for="dropzone-file"
-                    class="flex flex-col justify-center items-center w-full h-64 bg-slate-950 rounded-lg border-2 border-dashed border-slate-600 cursor-pointer hover:bg-slate-800 transition">
-                    <div class="flex flex-col justify-center items-center pt-5 pb-6">
-                        <svg class="mb-3 w-10 h-10 text-slate-400" fill="none" stroke="currentColor"
+                    class="flex flex-col justify-center items-center w-full h-72 bg-slate-950 rounded-lg border-2 border-dashed border-slate-600 cursor-pointer hover:bg-slate-800 hover:border-primary/50 transition">
+                    <div class="flex flex-col justify-center items-center pt-5 pb-6 px-4">
+                        <svg class="mb-4 w-14 h-14 text-slate-400" fill="none" stroke="currentColor"
                             viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
                             </path>
                         </svg>
-                        <p class="mb-2 text-sm text-slate-400"><span class="font-semibold">Click to upload</span> or
+                        <p class="mb-2 text-base text-slate-300"><span class="font-semibold">Click to upload</span> or
                             drag
                             and drop</p>
-                        <p class="text-xs text-slate-500">conversations.json (JSON)</p>
+                        <p class="text-sm text-slate-500">conversations.json (JSON)</p>
                     </div>
                     <input id="dropzone-file" type="file" accept=".json" class="hidden" @change="handleFileChange" />
                 </label>
             </div>
 
-
-
-            <div x-show="fileName" class="mt-4 text-center text-sm text-primary" x-text="'Selected: ' + fileName"></div>
+            <div x-show="fileName" class="mb-6 text-center text-base text-primary font-medium" x-text="'✓ Selected: ' + fileName"></div>
 
             <!-- Action Buttons -->
-            <div class="mt-6">
+            <div class="mt-8">
                 {% if request.app.state.db_ready is defined and not request.app.state.db_ready %}
-                <div class="mb-4 bg-red-500/10 border border-red-500/50 rounded-lg p-4 flex items-center gap-3">
+                <div class="mb-6 bg-red-500/10 border border-red-500/50 rounded-lg p-4 flex items-center gap-3">
                     <svg class="w-6 h-6 text-red-500 flex-shrink-0" fill="none" stroke="currentColor"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
-                    <div class="text-sm text-red-200">
+                    <div class="text-base text-red-200">
                         <span class="font-bold">Database Locked:</span> Ingestion is disabled because the database
                         structure is incomplete. Please check the banner above.
                     </div>
                 </div>
                 <button disabled
-                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-slate-400 bg-slate-800 cursor-not-allowed opacity-75">
+                    class="w-full flex justify-center py-4 px-6 border border-transparent rounded-lg shadow-sm text-base font-semibold text-slate-400 bg-slate-800 cursor-not-allowed opacity-75">
                     Ingestion Disabled
                 </button>
                 {% else %}
                 <button @click="uploadFile" :disabled="!file || uploading"
-                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-pink-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition">
+                    class="w-full flex justify-center py-4 px-6 border border-transparent rounded-lg shadow-sm text-base font-semibold text-white bg-secondary hover:bg-pink-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition">
                     <span x-show="!uploading">Start Ingestion</span>
                     <span x-show="uploading">Processing...</span>
                 </button>
@@ -208,8 +206,8 @@
 
             <!-- Status -->
             <div x-show="statusMessage"
-                :class="{'text-green-400': statusType === 'success', 'text-red-400': statusType === 'error'}"
-                class="mt-4 text-center text-sm font-medium" x-text="statusMessage">
+                :class="{'text-green-400 bg-green-500/10 border border-green-500/30': statusType === 'success', 'text-red-400 bg-red-500/10 border border-red-500/30': statusType === 'error'}"
+                class="mt-8 text-center text-base font-medium rounded-lg p-4" x-text="statusMessage">
             </div>
         </div>
 
