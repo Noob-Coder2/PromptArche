@@ -3,9 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 import httpx
 import logging
 import asyncio
+
+from app.core.csrf import CSRFProtectionMiddleware
 
 from app.core.config import settings
 from app.core.security import verify_jwt
@@ -24,6 +27,14 @@ async def lifespan(app: FastAPI):
     - Recovers in-progress jobs from database on startup
     - Gracefully shuts down all resources
     """
+    # Startup: Validate environment secrets
+    try:
+        settings.validate_secrets()
+        logger.info("Environment secrets validation passed")
+    except Exception as e:
+        logger.critical(f"Environment validation failed: {e}")
+        raise
+    
     # Startup: Initialize async task queue
     try:
         await TaskQueueService.initialize()
@@ -59,12 +70,13 @@ async def lifespan(app: FastAPI):
         if not app.state.db_ready:
             logger.critical(f"DATABASE NOT READY. Missing tables: {app.state.db_missing_tables}")
             logger.critical("Run 'app/db/schema.sql' and 'app/db/ingestion_jobs.sql' in Supabase SQL Editor.")
+            raise RuntimeError("Database schema not properly configured. Application cannot start.")
         else:
             logger.info("Database schema verification passed.")
             
     except Exception as e:
         logger.error(f"Failed to perform DB pre-flight check: {e}")
-        # Keep db_ready = False
+        raise RuntimeError("Database health check failed. Application cannot start.")
     
     logger.info(f"Database pooling configured: pool_size={settings.DB_POOL_SIZE}, timeout={settings.DB_POOL_TIMEOUT}s")
     logger.info(f"Async processing: batch_size={settings.BATCH_SIZE}, max_retries={settings.MAX_RETRIES}")
@@ -82,6 +94,13 @@ async def lifespan(app: FastAPI):
     logger.info("Database connection pool closed")
 
 app = FastAPI(title="PromptArche", lifespan=lifespan)
+
+# Add HTTPS redirect middleware if configured
+if settings.FORCE_HTTPS:
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+# Add CSRF protection middleware
+app.add_middleware(CSRFProtectionMiddleware)
 
 # Setup global error handlers
 setup_error_handlers(app)

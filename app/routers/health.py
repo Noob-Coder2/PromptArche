@@ -110,6 +110,10 @@ async def health_detailed(supabase = Depends(get_supabase)):
     - Overall system status
     - Individual service status, response times, and errors
     - Summary statistics
+    - System resources (memory, CPU, disk)
+    - Database table metrics
+    - Task queue status
+    - Ingestion job statistics
     - Recommendations for unhealthy services
     
     Warning: This is a heavy endpoint, use sparingly in production.
@@ -135,6 +139,140 @@ async def health_detailed(supabase = Depends(get_supabase)):
     }
 
 
+@router.get("/health/resources", response_model=Dict[str, Any])
+async def health_resources(supabase = Depends(get_supabase)):
+    """
+    System resource health check.
+    
+    Returns:
+    - Memory usage (percent, used/available in GB)
+    - CPU usage (percent)
+    - Disk usage (percent, used/free in GB)
+    
+    Thresholds:
+    - Memory: Degraded >80%, Unhealthy >90%
+    - CPU: Degraded >90%, Unhealthy >95%
+    - Disk: Degraded >85%, Unhealthy >95%
+    
+    Response:
+        {
+            "status": "healthy",
+            "resources": {
+                "memory_percent": 65.4,
+                "memory_used_gb": 4.2,
+                "memory_available_gb": 8.1,
+                "cpu_percent": 42.3,
+                "disk_percent": 72.1,
+                "disk_used_gb": 256.4,
+                "disk_free_gb": 98.2
+            }
+        }
+    """
+    health_service = HealthCheckService(supabase, cache_duration_seconds=15)
+    report = await health_service.check_all(use_cache=True, parallel=False)
+    
+    # Find resource check in report
+    resource_check = report.services.get("system_resources")
+    
+    if resource_check:
+        return {
+            "status": resource_check.status.value,
+            "checked_at": resource_check.last_checked.isoformat(),
+            "resources": resource_check.details,
+            "warning": resource_check.error
+        }
+    
+    return {"status": "unknown", "error": "Resource check not available"}
+
+
+@router.get("/health/database", response_model=Dict[str, Any])
+async def health_database(supabase = Depends(get_supabase)):
+    """
+    Database health and metrics.
+    
+    Returns:
+    - Overall database connectivity
+    - Table row counts
+    - Ingestion job status breakdown
+    
+    Response:
+        {
+            "status": "healthy",
+            "database_connection": {"status": "healthy", "response_time_ms": 45.2},
+            "tables": {
+                "prompts": {"rows": 1250},
+                "clusters": {"rows": 340},
+                "insights": {"rows": 892},
+                "embedding_cache": {"rows": 5420}
+            },
+            "ingestion_jobs": {
+                "pending": 5,
+                "processing": 2,
+                "completed": 1240,
+                "failed": 1
+            }
+        }
+    """
+    health_service = HealthCheckService(supabase, cache_duration_seconds=30)
+    report = await health_service.check_all(use_cache=True, parallel=True)
+    
+    db_check = report.services.get("database")
+    tables_check = report.services.get("database_tables")
+    jobs_check = report.services.get("ingestion_jobs")
+    
+    return {
+        "status": report.overall_status.value,
+        "checked_at": report.checked_at.isoformat(),
+        "database_connection": {
+            "status": db_check.status.value if db_check else "unknown",
+            "response_time_ms": db_check.response_time_ms if db_check else None
+        },
+        "tables": tables_check.details.get("tables", {}) if tables_check else {},
+        "total_rows": tables_check.details.get("total_rows", 0) if tables_check else 0,
+        "ingestion_jobs": jobs_check.details.get("job_status_breakdown", {}) if jobs_check else {}
+    }
+
+
+@router.get("/health/queue", response_model=Dict[str, Any])
+async def health_queue(supabase = Depends(get_supabase)):
+    """
+    Background task queue health.
+    
+    Returns:
+    - Queue size (number of pending jobs)
+    - Active tasks being processed
+    - Worker thread status
+    
+    Response:
+        {
+            "status": "healthy",
+            "queue": {
+                "queue_size": 3,
+                "active_tasks": 2,
+                "worker_alive": true
+            }
+        }
+    """
+    health_service = HealthCheckService(supabase, cache_duration_seconds=10)
+    report = await health_service.check_all(use_cache=True, parallel=False)
+    
+    queue_check = report.services.get("task_queue")
+    
+    if queue_check:
+        return {
+            "status": queue_check.status.value,
+            "checked_at": queue_check.last_checked.isoformat(),
+            "queue": {
+                "queue_size": queue_check.details.get("queue_size", 0),
+                "active_tasks": queue_check.details.get("active_tasks", 0),
+                "worker_alive": queue_check.details.get("worker_alive", False)
+            }
+        }
+    
+    return {"status": "unknown", "error": "Queue check not available"}
+
+
+
 def _get_recommendations(unhealthy_services: list) -> Dict[str, str]:
     """Get recovery recommendations for unhealthy services."""
     recommendations = {}
@@ -155,6 +293,22 @@ def _get_recommendations(unhealthy_services: list) -> Dict[str, str]:
         "embedding_cache": (
             "Cache service is unavailable. This may impact performance but functionality "
             "should degrade gracefully. Restart the service if issues persist."
+        ),
+        "task_queue": (
+            "Background task queue is unhealthy. Check task queue worker logs. "
+            "Verify the worker process is running and not stuck."
+        ),
+        "system_resources": (
+            "System resources are critically high. Check memory, CPU, and disk usage. "
+            "Consider scaling up resources or optimizing application."
+        ),
+        "database_tables": (
+            "Database tables are inaccessible. Verify Supabase connection and check "
+            "that all required tables exist in the schema."
+        ),
+        "ingestion_jobs": (
+            "High number of failed ingestion jobs. Check ingestion logs, verify file "
+            "formats and sizes, and check external API availability."
         ),
     }
     

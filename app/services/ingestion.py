@@ -351,14 +351,32 @@ class IngestionService:
             logger.info(f"Ingestion completed: {success_count} items processed in {batch_num} batches")
             return {"status": "success", "processed": success_count}
             
-        except Exception as e:
-            logger.error(f"Ingestion failed with exception: {e}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error: {e}", exc_info=True)
             if job_id:
                 IngestionJobService.fail_job(
-                    job_id, 
-                    f"Ingestion error: {str(e)}"
+                    job_id,
+                    f"Invalid JSON format: {str(e)}"
                 )
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": "Invalid JSON format"}
+        
+        except IOError as e:
+            logger.error(f"File I/O error: {e}", exc_info=True)
+            if job_id:
+                IngestionJobService.fail_job(
+                    job_id,
+                    f"File read error: {str(e)}"
+                )
+            return {"status": "error", "message": "File read error"}
+        
+        except Exception as e:
+            logger.error(f"Ingestion failed with unexpected exception: {e}", exc_info=True)
+            if job_id:
+                IngestionJobService.fail_job(
+                    job_id,
+                    f"Unexpected error: {str(e)}"
+                )
+            return {"status": "error", "message": "Unexpected error occurred"}
 
     @staticmethod
     @retry(
@@ -440,6 +458,17 @@ class IngestionService:
             # Insert with embeddings
             IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
             
+        except httpx.HTTPError as e:
+            batch_info = f" (batch {batch_num})" if batch_num else ""
+            logger.error(f"HTTP error during embedding generation{batch_info}: {e}")
+            # Fall back to inserting without embeddings
+            try:
+                IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
+                logger.info(f"Batch {batch_num} inserted without embeddings (HTTP fallback)")
+            except Exception as fallback_e:
+                logger.error(f"Fallback flush also failed: {fallback_e}")
+                raise
+        
         except Exception as e:
             batch_info = f" (batch {batch_num})" if batch_num else ""
             logger.error(f"Embedding batch generation failed{batch_info}: {e}")
