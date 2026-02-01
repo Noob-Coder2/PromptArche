@@ -4,6 +4,7 @@ Security module for JWT authentication and authorization.
 Uses OAuth2PasswordBearer for standardized auth handling.
 """
 import jwt
+from jwt import PyJWKClient, decode, PyJWTError
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Depends, status, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -12,6 +13,8 @@ from app.core.config import settings
 # OAuth2 scheme - auto_error=False allows fallback to cookie auth
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
+JWKS_URL = settings.SUPABASE_JWKS_URL
+jwk_client = PyJWKClient(JWKS_URL)
 
 async def get_current_user(
     request: Request,
@@ -43,26 +46,21 @@ async def get_current_user(
         )
     
     try:
+        signing_key = jwk_client.get_signing_key_from_jwt(auth_token)
         payload = jwt.decode(
             auth_token,
-            settings.SUPABASE_JWT_SECRET,
+            signing_key.key,
             algorithms=["ES256"],
             options={"verify_aud": False}  # Supabase doesn't always set aud
         )
         return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError as e:
+    except PyJWTError as e:
+        # Covers expired, invalid signature, malformed, etc.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
 
 async def get_current_user_id(
     payload: Dict[str, Any] = Depends(get_current_user)
@@ -109,15 +107,20 @@ async def get_optional_user(
         return None
     
     try:
+        signing_key = jwk_client.get_signing_key_from_jwt(auth_token)
         payload = jwt.decode(
             auth_token,
-            settings.SUPABASE_JWT_SECRET,
+            signing_key.key,
             algorithms=["ES256"],
             options={"verify_aud": False}
         )
         return payload
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        return None
+    except PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # Legacy compatibility - deprecated, use get_current_user instead
@@ -149,7 +152,7 @@ def verify_jwt(request: Request = None, credentials = None):
         payload = jwt.decode(
             token, 
             settings.SUPABASE_JWT_SECRET, 
-            algorithms=["ES256"], 
+            algorithms=["HS256"], 
             options={"verify_aud": False}
         )
         return payload
