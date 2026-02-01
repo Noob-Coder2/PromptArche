@@ -34,40 +34,74 @@ class IngestionParser(ABC):
 # --- Parsers ---
 class ChatGPTParser(IngestionParser):
     def parse(self, file_obj: IO) -> Generator[Dict[str, Any], None, None]:
-        # ChatGPT export is a list of conversations.
-        # ijson.items(f, 'item') yields each conversation dictionary one by one.
+        """
+        Parse ChatGPT export format (as of 2024-2026).
+        
+        Format structure:
+        - Array of conversations
+        - Each conversation has: title, create_time, update_time, mapping
+        - mapping contains nodes with messages
+        - Filter for user messages with actual content
+        """
         try:
             conversations = ijson.items(file_obj, 'item')
             for conversation in conversations:
+                # Extract conversation metadata
+                conversation_title = conversation.get('title', 'Untitled')
+                conversation_create_time = conversation.get('create_time')
+                
+                # Process mapping nodes
                 mapping = conversation.get('mapping', {})
                 for node_id, node in mapping.items():
                     message = node.get('message')
-                    # Check for User Role
-                    if message and message.get('author', {}).get('role') == 'user':
-                        if message.get('content', {}).get('content_type') != 'text':
-                            continue
-                            
-                        content_parts = message.get('content', {}).get('parts', [])
-                        if content_parts and isinstance(content_parts[0], str):
-                            text = content_parts[0]
-                            if not text.strip():
-                                continue
-                            
-                            # Metadata Extraction
-                            create_time = message.get('create_time')
-                            created_at = datetime.fromtimestamp(create_time).isoformat() if create_time else datetime.now().isoformat()
-                            
-                            yield {
-                                "content": text,
-                                "source": "chatgpt",
-                                "created_at": created_at,
-                                "metadata": {
-                                    "original_id": message.get('id'),
-                                    "conversation_id": conversation.get('conversation_id')
-                                }
-                            }
+                    
+                    # Skip nodes without messages
+                    if not message:
+                        continue
+                    
+                    # Only process user messages
+                    author = message.get('author', {})
+                    if author.get('role') != 'user':
+                        continue
+                    
+                    # Get content
+                    content = message.get('content', {})
+                    content_type = content.get('content_type')
+                    
+                    # Skip non-text content types
+                    # Filter out: user_editable_context, system messages, etc.
+                    if content_type != 'text':
+                        continue
+                    
+                    # Extract text from parts
+                    parts = content.get('parts', [])
+                    if not parts or not isinstance(parts[0], str):
+                        continue
+                    
+                    text = parts[0].strip()
+                    if not text:
+                        continue
+                    
+                    # Get timestamp (prefer message create_time, fallback to conversation)
+                    create_time = message.get('create_time') or conversation_create_time
+                    if create_time:
+                        created_at = datetime.fromtimestamp(create_time).isoformat()
+                    else:
+                        created_at = datetime.now().isoformat()
+                    
+                    yield {
+                        "content": text,
+                        "source": "chatgpt",
+                        "created_at": created_at,
+                        "metadata": {
+                            "message_id": message.get('id'),
+                            "conversation_title": conversation_title,
+                            "node_id": node_id
+                        }
+                    }
         except Exception as e:
-            logger.error(f"ChatGPT Parse Error: {e}")
+            logger.error(f"ChatGPT Parse Error: {e}", exc_info=True)
+
 
 class ClaudeParser(IngestionParser):
     def parse(self, file_obj: IO) -> Generator[Dict[str, Any], None, None]:

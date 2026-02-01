@@ -13,10 +13,15 @@ _supabase_client: Client = None # pyright: ignore[reportAssignmentType]
 def get_supabase() -> Client:
     """
     Get or create the Supabase client with connection pooling.
-    Uses a singleton pattern to reuse connections and prevent connection exhaustion.
+    Uses SERVICE ROLE KEY for backend operations to bypass RLS policies.
+    
+    This is safe because:
+    - Backend code is trusted (not exposed to users)
+    - User authentication is handled via JWT validation
+    - user_id is explicitly set from validated JWT tokens
     
     Returns:
-        Supabase client instance
+        Supabase client instance with service role privileges
         
     Raises:
         ValueError: If Supabase credentials are not configured
@@ -25,10 +30,11 @@ def get_supabase() -> Client:
     
     if _supabase_client is None:
         url: str = settings.SUPABASE_URL
-        key: str = settings.SUPABASE_KEY
+        # Use SERVICE ROLE KEY for backend operations (bypasses RLS)
+        key: str = settings.SUPABASE_SERVICE_KEY or settings.SUPABASE_KEY
         
         if not url or not key:
-            raise ValueError("Supabase URL and Key must be set in .env")
+            raise ValueError("Supabase URL and Service Key must be set in .env")
         
         # Create client with pooling configuration
         # Note: Supabase-py uses connection pooling automatically via httpx
@@ -50,3 +56,4 @@ def close_supabase_connection():
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Error closing Supabase connection: {e}")
+
