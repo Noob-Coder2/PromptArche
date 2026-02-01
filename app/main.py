@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import logging
 import asyncio
@@ -101,6 +102,15 @@ if settings.FORCE_HTTPS:
 
 # Add CSRF protection middleware
 app.add_middleware(CSRFProtectionMiddleware)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Setup global error handlers
 setup_error_handlers(app)

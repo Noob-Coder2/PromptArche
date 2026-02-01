@@ -231,7 +231,7 @@ class HealthCheckService:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 # Try a simple API call
                 response = await client.get(
-                    "https://api-inference.huggingface.co/status",
+                    "https://router.huggingface.co/status",
                     headers={"Accept": "application/json"}
                 )
             
@@ -399,13 +399,16 @@ class HealthCheckService:
         try:
             # Get list of all tables in public schema
             # Note: This query assumes Postgres structure
-            response = self.supabase.rpc(
-                "get_tables_info", {}
-            ).execute()
+            try:
+                response = self.supabase.rpc(
+                    "get_tables_info", {}
+                ).execute()
             
             # Fallback if RPC doesn't exist (which it won't by default):
             # We'll try to select 1 row from each table. specific error means missing.
             # This is a bit brute-force but works without admin RPCs.
+            except Exception as e:
+                logger.warning(f"RPC get_tables_info failed, using fallback: {e}")
             
             for table in required_tables:
                 try:

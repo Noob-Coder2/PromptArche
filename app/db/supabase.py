@@ -7,7 +7,7 @@ from supabase import create_client, Client
 from app.core.config import settings
 
 # Singleton connection instance with pooling
-_supabase_client: Client = None
+_supabase_client: Client = None # pyright: ignore[reportAssignmentType]
 
 
 def get_supabase() -> Client:
@@ -45,7 +45,7 @@ def close_supabase_connection():
     global _supabase_client
     if _supabase_client is not None:
         try:
-            _supabase_client.postgrest.auth.session = None
+            # _supabase_client.postgrest.auth.session = None # Caused error, not needed
             _supabase_client = None
         except Exception as e:
             import logging

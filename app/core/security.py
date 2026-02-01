@@ -46,7 +46,7 @@ async def get_current_user(
         payload = jwt.decode(
             auth_token,
             settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
+            algorithms=["ES256"],
             options={"verify_aud": False}  # Supabase doesn't always set aud
         )
         return payload
@@ -112,7 +112,7 @@ async def get_optional_user(
         payload = jwt.decode(
             auth_token,
             settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
+            algorithms=["ES256"],
             options={"verify_aud": False}
         )
         return payload
@@ -149,7 +149,7 @@ def verify_jwt(request: Request = None, credentials = None):
         payload = jwt.decode(
             token, 
             settings.SUPABASE_JWT_SECRET, 
-            algorithms=["HS256"], 
+            algorithms=["ES256"], 
             options={"verify_aud": False}
         )
         return payload

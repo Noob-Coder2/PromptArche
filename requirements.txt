@@ -13,4 +13,5 @@ python-dotenv
 tenacity
 httpx
 pyjwt
-ijsonpsutil
+ijson
+psutil
