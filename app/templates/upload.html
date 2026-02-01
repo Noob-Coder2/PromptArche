@@ -220,6 +220,18 @@
                     uploading: false,
                     statusMessage: '',
                     statusType: 'success',
+                    csrfToken: '',
+
+                    async init() {
+                        // Fetch CSRF token on page load
+                        try {
+                            const response = await fetch('/api/csrf-token');
+                            const data = await response.json();
+                            this.csrfToken = data.token || data.csrf_token;
+                        } catch (e) {
+                            console.error('Failed to fetch CSRF token:', e);
+                        }
+                    },
 
                     handleFileChange(event) {
                         const file = event.target.files[0];
@@ -239,10 +251,12 @@
                         formData.append('provider', this.provider);
 
                         try {
-                            // We need to send the Auth token. Check cookie.
-                            // If we use standard fetch, cookies are sent automatically to same-origin.
+                            // Include CSRF token in headers
                             const response = await fetch('/api/ingest', {
                                 method: 'POST',
+                                headers: {
+                                    'X-CSRF-Token': this.csrfToken
+                                },
                                 body: formData
                             });
 
@@ -252,7 +266,7 @@
                                 this.statusType = 'success';
                                 this.statusMessage = `Success! ${result.processed || 0} prompts queued.`;
                             } else {
-                                throw new Error(result.detail || 'Upload failed');
+                                throw new Error(result.detail || result.error || 'Upload failed');
                             }
                         } catch (e) {
                             this.statusType = 'error';

@@ -45,4 +45,11 @@ async def get_current_user_info(user_id: str = Depends(get_current_user_id)):
 @router.get("/api/csrf-token")
 async def get_csrf_token_endpoint(request: Request):
     """Get CSRF token for form submissions."""
-    return get_csrf_token(request)
+    result = get_csrf_token(request)
+    
+    # If a new token was generated, return the response with cookie
+    if "response" in result:
+        return result["response"]
+    
+    # If token already exists in cookie, return it as JSON
+    return {"token": result["token"]}

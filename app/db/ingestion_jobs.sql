@@ -7,6 +7,7 @@ create table if not exists ingestion_jobs (
   current_count int default 0,
   total_count int default 0,
   error_message text,
+  temp_file_path text, -- Path to temporary file for job recovery
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
