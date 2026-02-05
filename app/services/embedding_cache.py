@@ -16,11 +16,12 @@ Architecture:
 import asyncio
 import hashlib
 import logging
-import httpx
+import numpy as np
 from typing import List, Optional, Dict, Tuple
 from datetime import datetime, timedelta
 from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential
+from huggingface_hub import InferenceClient
 
 from app.core.config import settings
 from app.db.supabase import get_supabase
@@ -28,7 +29,7 @@ from app.db.supabase import get_supabase
 logger = logging.getLogger(__name__)
 
 # HuggingFace API configuration
-HF_API_URL = "https://api-inference.huggingface.co/models/BAAI/bge-large-en-v1.5"
+MODEL_NAME = "BAAI/bge-large-en-v1.5"
 
 # Batch size for HF API (optimal: 25-50 texts per batch)
 EMBEDDING_BATCH_SIZE = 32  # Default batch size for HuggingFace API
@@ -51,6 +52,7 @@ class EmbeddingCache:
         self._cache_misses = 0
         self._api_calls = 0
         self._semaphore = asyncio.Semaphore(5)  # Rate limit concurrent API calls
+        self._hf_client = InferenceClient(token=settings.HF_TOKEN)  # Reusable client
     
     def _hash_text(self, text: str) -> str:
         """Create deterministic hash of text for cache key."""
@@ -63,7 +65,7 @@ class EmbeddingCache:
     async def get_embedding(
         self,
         text: str,
-        client: Optional[httpx.AsyncClient] = None
+        client: Optional[InferenceClient] = None
     ) -> Optional[List[float]]:
         """
         Get embedding for single text with two-layer cache.
@@ -117,7 +119,7 @@ class EmbeddingCache:
     async def get_embeddings_batch(
         self,
         texts: List[str],
-        client: Optional[httpx.AsyncClient] = None
+        client: Optional[InferenceClient] = None
     ) -> List[Optional[List[float]]]:
         """
         Get embeddings for multiple texts, optimizing API calls through batching.
@@ -229,45 +231,36 @@ class EmbeddingCache:
     async def _call_huggingface_api(
         self,
         text: str,
-        client: Optional[httpx.AsyncClient] = None
+        client: Optional[InferenceClient] = None
     ) -> Optional[List[float]]:
-        """Call HuggingFace API for single text (called from get_embedding)."""
-        headers = {"Authorization": f"Bearer {settings.HF_TOKEN}"}
-        payload = {"inputs": text}
+        """Call HuggingFace API for single text using InferenceClient."""
+        if client is None:
+            client = self._hf_client
         
         async with self._semaphore:
             try:
-                if client:
-                    response = await client.post(
-                        HF_API_URL,
-                        headers=headers,
-                        json=payload,
-                        timeout=30.0
-                    )
-                else:
-                    async with httpx.AsyncClient() as temp_client:
-                        response = await temp_client.post(
-                            HF_API_URL,
-                            headers=headers,
-                            json=payload,
-                            timeout=30.0
-                        )
-                
-                if response.status_code != 200:
-                    logger.error(f"HF API error {response.status_code}: {response.text}")
-                    return None
+                # Run synchronous feature_extraction in thread pool
+                loop = asyncio.get_event_loop()
+                embedding = await loop.run_in_executor(
+                    None,
+                    lambda: client.feature_extraction(text, model=MODEL_NAME)
+                )
                 
                 self._api_calls += 1
-                result = response.json()
                 
-                # Parse response
-                if isinstance(result, list) and len(result) > 0:
-                    if isinstance(result[0], float):
-                        return result
-                    elif isinstance(result[0], list):
-                        return result[0]
+                # Convert numpy array to list if needed
+                if isinstance(embedding, np.ndarray):
+                    return embedding.tolist()
+                elif isinstance(embedding, list):
+                    # Handle nested list structure
+                    if len(embedding) > 0 and isinstance(embedding[0], (list, np.ndarray)):
+                        first_item = embedding[0]
+                        if isinstance(first_item, np.ndarray):
+                            return first_item.tolist()
+                        return first_item
+                    return embedding
                 
-                logger.error(f"Unexpected response format: {result}")
+                logger.error(f"Unexpected embedding format: {type(embedding)}")
                 return None
             except Exception as e:
                 logger.error(f"API call failed: {e}")
@@ -280,58 +273,26 @@ class EmbeddingCache:
     async def _call_huggingface_api_batch(
         self,
         texts: List[str],
-        client: Optional[httpx.AsyncClient] = None
+        client: Optional[InferenceClient] = None
     ) -> List[Optional[List[float]]]:
         """
-        Call HuggingFace API for batch of texts.
+        Call HuggingFace API for batch of texts using InferenceClient.
         
-        HF API expects array of strings and returns array of embeddings.
-        Much more efficient than individual calls.
+        Note: InferenceClient doesn't support batch processing natively,
+        so we process texts individually with concurrent execution.
         """
-        headers = {"Authorization": f"Bearer {settings.HF_TOKEN}"}
-        payload = {"inputs": texts}
+        if client is None:
+            client = self._hf_client
         
-        async with self._semaphore:
-            try:
-                if client:
-                    response = await client.post(
-                        HF_API_URL,
-                        headers=headers,
-                        json=payload,
-                        timeout=60.0  # Batch might take longer
-                    )
-                else:
-                    async with httpx.AsyncClient() as temp_client:
-                        response = await temp_client.post(
-                            HF_API_URL,
-                            headers=headers,
-                            json=payload,
-                            timeout=60.0
-                        )
-                
-                if response.status_code != 200:
-                    logger.error(f"HF API batch error {response.status_code}: {response.text}")
-                    return [None] * len(texts)
-                
-                self._api_calls += 1
-                result = response.json()
-                
-                # Parse batch response
-                if isinstance(result, list) and len(result) > 0:
-                    # Each item should be an embedding (list of floats)
-                    if isinstance(result[0], list):
-                        # Result is list of embeddings - perfect!
-                        if len(result) == len(texts):
-                            return result
-                    elif isinstance(result[0], float):
-                        # Single embedding wrapped in array
-                        return [result] if len(texts) == 1 else [result]
-                
-                logger.error(f"Unexpected batch response format: {result}")
-                return [None] * len(texts)
-            except Exception as e:
-                logger.error(f"Batch API call failed: {e}")
-                raise
+        # Process batch as concurrent individual requests
+        tasks = [self._call_huggingface_api(text, client) for text in texts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Convert exceptions to None
+        return [
+            result if not isinstance(result, Exception) else None
+            for result in results
+        ]
     
     async def _get_from_database(self, text_hash: str) -> Optional[List[float]]:
         """Retrieve embedding from database cache."""
@@ -400,7 +361,7 @@ def get_embedding_cache() -> EmbeddingCache:
 # Convenience functions
 async def get_cached_embedding(
     text: str,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[InferenceClient] = None
 ) -> Optional[List[float]]:
     """Get embedding for single text with caching."""
     cache = get_embedding_cache()
@@ -409,7 +370,7 @@ async def get_cached_embedding(
 
 async def get_cached_embeddings_batch(
     texts: List[str],
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[InferenceClient] = None
 ) -> List[Optional[List[float]]]:
     """Get embeddings for batch of texts with intelligent caching and batching."""
     cache = get_embedding_cache()

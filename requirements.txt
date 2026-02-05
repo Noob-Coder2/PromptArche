@@ -15,3 +15,4 @@ httpx
 pyjwt
 ijson
 psutil
+huggingface_hub

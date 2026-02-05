@@ -1,62 +1,75 @@
 
-import httpx
 import asyncio
+import numpy as np
 from typing import List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
+from huggingface_hub import InferenceClient
 from app.core.config import settings
 
-# BGE-Large-EN-v1.5 API URL on HF
-HF_API_URL = "https://api-inference.huggingface.co/models/BAAI/bge-large-en-v1.5"
+# Model configuration
+MODEL_NAME = "BAAI/bge-large-en-v1.5"
 
 # Semaphore to limit concurrent requests (HF free tier rate limiting)
 EMBEDDING_SEMAPHORE = asyncio.Semaphore(5)
+
+# Global client instance (reused across requests)
+_hf_client: Optional[InferenceClient] = None
+
+
+def get_hf_client() -> InferenceClient:
+    """Get or create the global HuggingFace InferenceClient instance."""
+    global _hf_client
+    if _hf_client is None:
+        _hf_client = InferenceClient(token=settings.HF_TOKEN)
+    return _hf_client
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def generate_embedding(
     text: str,
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[InferenceClient] = None
 ) -> List[float]:
     """
-    Generates embedding for a single text using HF Inference API.
+    Generates embedding for a single text using HuggingFace Hub InferenceClient.
     Uses semaphore to limit concurrent requests.
     
     Args:
         text: The text to embed
-        client: Optional persistent HTTP client. If None, creates a new one.
+        client: Optional InferenceClient. If None, uses global client.
+    
+    Returns:
+        List of floats representing the embedding vector (1024 dimensions for BGE-Large)
     """
-    headers = {"Authorization": f"Bearer {settings.HF_TOKEN}"}
-    payload = {"inputs": text}
+    if client is None:
+        client = get_hf_client()
     
     async with EMBEDDING_SEMAPHORE:
-        if client:
-            response = await client.post(HF_API_URL, headers=headers, json=payload, timeout=30.0)
-        else:
-            # Fallback for cases where client isn't available
-            async with httpx.AsyncClient() as fallback_client:
-                response = await fallback_client.post(HF_API_URL, headers=headers, json=payload, timeout=30.0)
+        # Run the synchronous feature_extraction in a thread pool
+        loop = asyncio.get_event_loop()
+        embedding = await loop.run_in_executor(
+            None,
+            lambda: client.feature_extraction(text, model=MODEL_NAME)
+        )
         
-        if response.status_code != 200:
-            raise Exception(f"HF API Error: {response.status_code} - {response.text}")
-            
-        result = response.json()
+        # Convert numpy array to list if needed
+        if isinstance(embedding, np.ndarray):
+            return embedding.tolist()
+        elif isinstance(embedding, list):
+            # Handle nested list structure
+            if len(embedding) > 0 and isinstance(embedding[0], (list, np.ndarray)):
+                # Batch response for single item
+                first_item = embedding[0]
+                if isinstance(first_item, np.ndarray):
+                    return first_item.tolist()
+                return first_item
+            return embedding
         
-        # HF Inference API for feature-extraction usually returns a list of floats (if 1 input)
-        # or a list of list of floats.
-        if isinstance(result, list):
-             # For a single string input, it might return just the list of floats
-             # OR a list containing the list of floats.
-             if len(result) > 0 and isinstance(result[0], float):
-                 return result
-             if len(result) > 0 and isinstance(result[0], list):
-                 return result[0]
-                 
-        raise Exception(f"Unexpected response format: {result}")
+        raise Exception(f"Unexpected embedding format: {type(embedding)}")
 
 
 async def generate_embeddings_batch(
     texts: List[str],
-    client: Optional[httpx.AsyncClient] = None
+    client: Optional[InferenceClient] = None
 ) -> List[List[float]]:
     """
     Generates embeddings for a batch of texts concurrently.
@@ -64,16 +77,22 @@ async def generate_embeddings_batch(
     
     Args:
         texts: List of texts to embed
-        client: Optional persistent HTTP client
+        client: Optional InferenceClient. If None, uses global client.
+    
+    Returns:
+        List of embedding vectors (None for failed items)
     """
     if not texts:
         return []
+    
+    if client is None:
+        client = get_hf_client()
     
     # Create concurrent tasks with semaphore control
     tasks = [generate_embedding(text, client) for text in texts]
     embeddings = await asyncio.gather(*tasks, return_exceptions=True)
     
-    # Handle any exceptions - retry failed ones or return None
+    # Handle any exceptions - log and return None for failed embeddings
     result = []
     for i, emb in enumerate(embeddings):
         if isinstance(emb, Exception):

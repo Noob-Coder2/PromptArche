@@ -1,7 +1,5 @@
-
 import json
 import logging
-import httpx
 import ijson
 import warnings
 import tempfile
@@ -85,7 +83,8 @@ class ChatGPTParser(IngestionParser):
                     # Get timestamp (prefer message create_time, fallback to conversation)
                     create_time = message.get('create_time') or conversation_create_time
                     if create_time:
-                        created_at = datetime.fromtimestamp(create_time).isoformat()
+                        # ijson returns Decimal for floats, convert to float first
+                        created_at = datetime.fromtimestamp(float(create_time)).isoformat()
                     else:
                         created_at = datetime.now().isoformat()
                     
@@ -492,17 +491,6 @@ class IngestionService:
             # Insert with embeddings
             IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
             
-        except httpx.HTTPError as e:
-            batch_info = f" (batch {batch_num})" if batch_num else ""
-            logger.error(f"HTTP error during embedding generation{batch_info}: {e}")
-            # Fall back to inserting without embeddings
-            try:
-                IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
-                logger.info(f"Batch {batch_num} inserted without embeddings (HTTP fallback)")
-            except Exception as fallback_e:
-                logger.error(f"Fallback flush also failed: {fallback_e}")
-                raise
-        
         except Exception as e:
             batch_info = f" (batch {batch_num})" if batch_num else ""
             logger.error(f"Embedding batch generation failed{batch_info}: {e}")
