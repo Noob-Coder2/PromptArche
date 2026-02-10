@@ -58,3 +58,33 @@ async def get_timeline_data(user_id: str = Depends(get_current_user_id), _: None
     }
 
     return chart_data
+
+
+@router.get("/api/analytics/prompt-stats")
+async def get_prompt_analytics(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
+    """
+    Get comprehensive prompt analytics for the current user.
+    
+    Returns:
+        - summary: Aggregate statistics (total, avg/min/max length, by source)
+        - distribution: Length distribution in histogram buckets
+        - by_source: Statistics grouped by provider (chatgpt/claude/grok)
+        - recent_trends: Daily trends for the last 30 days
+        - extremes: Top 10 longest and shortest prompts
+    """
+    supabase = get_supabase()
+    
+    # Call the PostgreSQL function that aggregates all analytics views
+    result = supabase.rpc('get_user_analytics', {'target_user_id': user_id}).execute()
+    
+    # If no data, return empty structure
+    if not result.data:
+        return {
+            "summary": None,
+            "distribution": [],
+            "by_source": [],
+            "recent_trends": [],
+            "extremes": []
+        }
+    
+    return result.data

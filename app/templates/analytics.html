@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+
+{% block title %}Prompt Analytics - PromptArche{% endblock %}
+
+{% block content %}
+<div class="space-y-8" x-data="analyticsData()">
+    <!-- Header -->
+    <header>
+        <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary mb-2">
+            Prompt Analytics</h1>
+        <p class="text-lg text-slate-400">Deep dive into your prompting patterns and statistics.</p>
+    </header>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="flex justify-center items-center py-20">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div>
+    </div>
+
+    <!-- Content (shown when loaded) -->
+    <div x-show="!loading" x-cloak>
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- Total Prompts -->
+            <div
+                class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
+                <div class="px-6 py-8 sm:p-8">
+                    <dt class="text-base font-medium text-slate-400 truncate">Total Prompts</dt>
+                    <dd class="mt-2 text-4xl font-bold text-white" x-text="summary?.total_prompts || 0"></dd>
+                </div>
+            </div>
+
+            <!-- Average Length -->
+            <div
+                class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
+                <div class="px-6 py-8 sm:p-8">
+                    <dt class="text-base font-medium text-slate-400 truncate">Avg Length</dt>
+                    <dd class="mt-2 text-4xl font-bold text-white">
+                        <span x-text="summary?.avg_prompt_length || 0"></span>
+                        <span class="text-xl text-slate-500">chars</span>
+                    </dd>
+                </div>
+            </div>
+
+            <!-- Longest Prompt -->
+            <div
+                class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-secondary/50 transition">
+                <div class="px-6 py-8 sm:p-8">
+                    <dt class="text-base font-medium text-slate-400 truncate">Longest Prompt</dt>
+                    <dd class="mt-2 text-4xl font-bold text-white" x-text="summary?.max_prompt_length || 0"></dd>
+                </div>
+            </div>
+
+            <!-- Sources Used -->
+            <div
+                class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-secondary/50 transition">
+                <div class="px-6 py-8 sm:p-8">
+                    <dt class="text-base font-medium text-slate-400 truncate">Sources Used</dt>
+                    <dd class="mt-2 text-4xl font-bold text-white" x-text="summary?.sources_used || 0"></dd>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Length Distribution Chart -->
+            <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+                <h3 class="text-2xl leading-8 font-bold text-white mb-6">Prompt Length Distribution</h3>
+                <div class="relative h-80 w-full">
+                    <canvas id="distributionChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Provider Comparison Chart -->
+            <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+                <h3 class="text-2xl leading-8 font-bold text-white mb-6">Average Length by Provider</h3>
+                <div class="relative h-80 w-full">
+                    <canvas id="providerChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trends Chart -->
+        <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+            <h3 class="text-2xl leading-8 font-bold text-white mb-6">Prompt Activity Over Time (Last 30 Days)</h3>
+            <div class="relative h-80 w-full">
+                <canvas id="trendsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Stats by Provider -->
+        <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+            <h3 class="text-2xl leading-8 font-bold text-white mb-6">Statistics by Provider</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-white/10">
+                    <thead>
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Provider</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Count</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Avg Length</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Median</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Range</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                                Last 30 Days</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-white/5">
+                        <template x-for="provider in by_source" :key="provider.source">
+                            <tr class="hover:bg-white/5 transition">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white capitalize"
+                                    x-text="provider.source"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300"
+                                    x-text="provider.prompt_count"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300"
+                                    x-text="provider.avg_length"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300"
+                                    x-text="provider.median_length"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300"
+                                    x-text="provider.min_length + ' - ' + provider.max_length"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300"
+                                    x-text="provider.prompts_last_30_days"></td>
+                            </tr>
+                        </template>
+                        <template x-if="!by_source || by_source.length === 0">
+                            <tr>
+                                <td colspan="6" class="px-6 py-8 text-center text-slate-500">
+                                    No provider data available yet.
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Extreme Prompts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Longest Prompts -->
+            <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+                <h3 class="text-xl leading-8 font-bold text-white mb-4">📏 Longest Prompts</h3>
+                <div class="space-y-3">
+                    <template x-for="prompt in extremes.filter(e => e.category === 'longest').slice(0, 5)"
+                        :key="prompt.id">
+                        <div class="border border-white/5 rounded p-4 hover:border-primary/30 transition">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-xs font-semibold text-primary uppercase"
+                                    x-text="prompt.source"></span>
+                                <span class="text-xs text-slate-400" x-text="prompt.length + ' chars'"></span>
+                            </div>
+                            <p class="text-sm text-slate-300 line-clamp-2" x-text="prompt.preview + '...'"></p>
+                        </div>
+                    </template>
+                    <template x-if="!extremes || extremes.filter(e => e.category === 'longest').length === 0">
+                        <p class="text-slate-500 text-sm">No data available yet.</p>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Shortest Prompts -->
+            <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8">
+                <h3 class="text-xl leading-8 font-bold text-white mb-4">⚡ Shortest Prompts</h3>
+                <div class="space-y-3">
+                    <template x-for="prompt in extremes.filter(e => e.category === 'shortest').slice(0, 5)"
+                        :key="prompt.id">
+                        <div class="border border-white/5 rounded p-4 hover:border-secondary/30 transition">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-xs font-semibold text-secondary uppercase"
+                                    x-text="prompt.source"></span>
+                                <span class="text-xs text-slate-400" x-text="prompt.length + ' chars'"></span>
+                            </div>
+                            <p class="text-sm text-slate-300 line-clamp-2" x-text="prompt.preview"></p>
+                        </div>
+                    </template>
+                    <template x-if="!extremes || extremes.filter(e => e.category === 'shortest').length === 0">
+                        <p class="text-slate-500 text-sm">No data available yet.</p>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function analyticsData() {
+        return {
+            loading: true,
+            summary: null,
+            distribution: [],
+            by_source: [],
+            recent_trends: [],
+            extremes: [],
+
+            async init() {
+                await this.loadAnalytics();
+                this.renderCharts();
+            },
+
+            async loadAnalytics() {
+                try {
+                    const response = await fetch('/api/analytics/prompt-stats');
+                    if (!response.ok) throw new Error('Failed to load analytics');
+
+                    const data = await response.json();
+                    this.summary = data.summary;
+                    this.distribution = data.distribution || [];
+                    this.by_source = data.by_source || [];
+                    this.recent_trends = data.recent_trends || [];
+                    this.extremes = data.extremes || [];
+
+                    this.loading = false;
+                } catch (error) {
+                    console.error('Error loading analytics:', error);
+                    this.loading = false;
+                }
+            },
+
+            renderCharts() {
+                this.$nextTick(() => {
+                    this.renderDistributionChart();
+                    this.renderProviderChart();
+                    this.renderTrendsChart();
+                });
+            },
+
+            renderDistributionChart() {
+                const ctx = document.getElementById('distributionChart');
+                if (!ctx) return;
+
+                const labels = this.distribution.map(d => d.length_bucket);
+                const counts = this.distribution.map(d => d.bucket_count);
+
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Prompts',
+                            data: counts,
+                            backgroundColor: 'rgba(99, 102, 241, 0.6)',
+                            borderColor: '#6366f1',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            },
+
+            renderProviderChart() {
+                const ctx = document.getElementById('providerChart');
+                if (!ctx) return;
+
+                const labels = this.by_source.map(s => s.source.charAt(0).toUpperCase() + s.source.slice(1));
+                const avgLengths = this.by_source.map(s => s.avg_length);
+
+                const colors = ['#6366f1', '#ec4899', '#10b981'];
+
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Avg Length',
+                            data: avgLengths,
+                            backgroundColor: colors,
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            },
+
+            renderTrendsChart() {
+                const ctx = document.getElementById('trendsChart');
+                if (!ctx) return;
+
+                const labels = this.recent_trends.map(t => t.date.split('T')[0]);
+                const counts = this.recent_trends.map(t => t.prompts_count);
+                const avgLengths = this.recent_trends.map(t => t.avg_length);
+
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Prompt Count',
+                                data: counts,
+                                borderColor: '#6366f1',
+                                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                                tension: 0.4,
+                                fill: true,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Avg Length',
+                                data: avgLengths,
+                                borderColor: '#ec4899',
+                                backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                                tension: 0.4,
+                                fill: false,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                beginAtZero: true,
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                beginAtZero: true,
+                                grid: { drawOnChartArea: false }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+</script>
+{% endblock %}

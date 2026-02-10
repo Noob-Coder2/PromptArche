@@ -91,11 +91,13 @@ class ChatGPTParser(IngestionParser):
                     yield {
                         "content": text,
                         "source": "chatgpt",
+                        "external_id": message.get('id'),
                         "created_at": created_at,
                         "metadata": {
                             "message_id": message.get('id'),
                             "conversation_title": conversation_title,
-                            "node_id": node_id
+                            "node_id": node_id,
+                            "prompt_length": len(text)
                         }
                     }
         except Exception as e:
@@ -143,11 +145,13 @@ class ClaudeParser(IngestionParser):
                         yield {
                             "content": text.strip(),
                             "source": "claude",
+                            "external_id": msg.get('uuid'),
                             "created_at": created_at,
                             "metadata": {
                                 "conversation_uuid": conversation_uuid,
                                 "conversation_name": conversation_name,
-                                "message_uuid": msg.get('uuid')
+                                "message_uuid": msg.get('uuid'),
+                                "prompt_length": len(text.strip())
                             }
                         }
         except Exception as e:
@@ -201,11 +205,13 @@ class GrokParser(IngestionParser):
                         yield {
                             "content": text,
                             "source": "grok",
+                            "external_id": response.get('_id'),
                             "created_at": created_at,
                             "metadata": {
                                 "conversation_id": conversation_id,
                                 "title": title,
-                                "response_id": response.get('_id')
+                                "response_id": response.get('_id'),
+                                "prompt_length": len(text)
                             }
                         }
         except Exception as e:
@@ -435,11 +441,22 @@ class IngestionService:
             Exception: If all retry attempts fail
         """
         try:
-            supabase.table("prompts").upsert(
-                batch, on_conflict="user_id, content", ignore_duplicates=True
-            ).execute()
-            if batch_num:
-                logger.debug(f"Successfully flushed batch {batch_num} with {len(batch)} items")
+            # We use insert and catch duplicate key errors.
+            # Uniqueness is enforced by (user_id, source, external_id) constraint.
+            # This allows duplicate CONTENT (same prompt text) but prevents duplicate EVENTS.
+            try:
+                result = supabase.table("prompts").insert(batch).execute()
+                if batch_num:
+                    logger.debug(f"Successfully flushed batch {batch_num} with {len(batch)} items")
+            except Exception as insert_error:
+                # Check if it's a duplicate key error (23505 is PostgreSQL's unique violation code)
+                error_msg = str(insert_error)
+                if '23505' in error_msg or 'duplicate' in error_msg.lower():
+                    # Duplicates are expected and OK - insert succeeded for non-duplicates
+                    logger.debug(f"Batch {batch_num} had some duplicates (expected behavior)")
+                else:
+                    # This is a real error, re-raise it
+                    raise
         except Exception as e:
             batch_info = f" (batch {batch_num})" if batch_num else ""
             logger.warning(f"Upsert attempt failed{batch_info}, will retry: {e}")

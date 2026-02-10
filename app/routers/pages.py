@@ -66,6 +66,12 @@ async def upload_view(request: Request, user_id: str = Depends(get_current_user_
     return templates.TemplateResponse("upload.html", {"request": request})
 
 
+@router.get("/analytics", response_class=HTMLResponse)
+async def analytics_view(request: Request, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
+    """Render the analytics page."""
+    return templates.TemplateResponse("analytics.html", {"request": request})
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""
