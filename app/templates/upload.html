@@ -205,11 +205,102 @@
             </div>
 
             <!-- Status -->
-            <div x-show="statusMessage"
+            <div x-show="statusMessage && !jobId"
                 :class="{'text-green-400 bg-green-500/10 border border-green-500/30': statusType === 'success', 'text-red-400 bg-red-500/10 border border-red-500/30': statusType === 'error'}"
                 class="mt-8 text-center text-base font-medium rounded-lg p-4" x-text="statusMessage">
             </div>
+
+            <!-- Multi-Stage Progress Indicator -->
+            <div x-show="jobId" class="mt-8">
+                <div class="bg-slate-950 border border-white/10 rounded-xl p-6 space-y-6">
+                    <!-- Pipeline Stages -->
+                    <div class="flex items-center justify-between relative">
+                        <!-- Connecting line (background) -->
+                        <div class="absolute top-5 left-[10%] right-[10%] h-0.5 bg-slate-700 z-0"></div>
+                        <!-- Connecting line (active) -->
+                        <div class="absolute top-5 left-[10%] h-0.5 bg-gradient-to-r from-primary to-secondary z-0 transition-all duration-700 ease-out"
+                            :style="'width:' + progressLineWidth + '%'"></div>
+
+                        <template x-for="(stage, idx) in stages" :key="stage.id">
+                            <div class="flex flex-col items-center z-10 flex-1">
+                                <!-- Stage Circle -->
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-500 border-2"
+                                    :class="{
+                                        'bg-primary/20 border-primary text-primary shadow-lg shadow-primary/30': currentStageIdx === idx && jobStatus !== 'COMPLETED' && jobStatus !== 'FAILED',
+                                        'bg-green-500/20 border-green-500 text-green-400': currentStageIdx > idx || (stage.id === 'complete' && jobStatus === 'COMPLETED'),
+                                        'bg-slate-800 border-slate-600 text-slate-500': currentStageIdx < idx && jobStatus !== 'COMPLETED',
+                                        'bg-red-500/20 border-red-500 text-red-400 animate-pulse': jobStatus === 'FAILED' && currentStageIdx === idx
+                                    }">
+                                    <!-- Checkmark for completed stages -->
+                                    <template x-if="currentStageIdx > idx || (stage.id === 'complete' && jobStatus === 'COMPLETED')">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                                        </svg>
+                                    </template>
+                                    <!-- Spinner for active stage -->
+                                    <template x-if="currentStageIdx === idx && jobStatus !== 'COMPLETED' && jobStatus !== 'FAILED'">
+                                        <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                        </svg>
+                                    </template>
+                                    <!-- Number for pending stages -->
+                                    <template x-if="currentStageIdx < idx && jobStatus !== 'COMPLETED'">
+                                        <span x-text="idx + 1"></span>
+                                    </template>
+                                    <!-- X for failed -->
+                                    <template x-if="jobStatus === 'FAILED' && currentStageIdx === idx">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </template>
+                                </div>
+                                <!-- Stage Label -->
+                                <span class="mt-2 text-xs font-medium transition-colors duration-300"
+                                    :class="{
+                                        'text-primary': currentStageIdx === idx && jobStatus !== 'COMPLETED' && jobStatus !== 'FAILED',
+                                        'text-green-400': currentStageIdx > idx || (stage.id === 'complete' && jobStatus === 'COMPLETED'),
+                                        'text-slate-500': currentStageIdx < idx && jobStatus !== 'COMPLETED',
+                                        'text-red-400': jobStatus === 'FAILED' && currentStageIdx === idx
+                                    }" x-text="stage.label"></span>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Status Text -->
+                    <div class="text-center space-y-2">
+                        <p class="text-base font-medium"
+                            :class="{
+                                'text-white': jobStatus !== 'COMPLETED' && jobStatus !== 'FAILED',
+                                'text-green-400': jobStatus === 'COMPLETED',
+                                'text-red-400': jobStatus === 'FAILED'
+                            }"
+                            x-text="statusLine"></p>
+                        <p x-show="currentCount > 0 && jobStatus !== 'COMPLETED' && jobStatus !== 'FAILED'"
+                            class="text-sm text-slate-400">
+                            <span x-text="currentCount"></span> prompts processed
+                        </p>
+                        <p x-show="jobStatus === 'COMPLETED'" class="text-sm text-green-300">
+                            🎉 <span x-text="currentCount"></span> prompts ingested successfully
+                        </p>
+                        <p x-show="jobError && jobStatus === 'FAILED'" class="text-sm text-red-300 mt-2" x-text="jobError"></p>
+                    </div>
+
+                    <!-- Action Button after completion -->
+                    <div x-show="jobStatus === 'COMPLETED' || jobStatus === 'FAILED'" class="flex justify-center gap-4 pt-2">
+                        <a x-show="jobStatus === 'COMPLETED'" href="/dashboard"
+                            class="px-6 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg text-sm font-medium hover:bg-primary/30 transition">
+                            View Dashboard →
+                        </a>
+                        <button x-show="jobStatus === 'FAILED'" @click="resetUpload()"
+                            class="px-6 py-2 bg-slate-800 text-white border border-white/10 rounded-lg text-sm font-medium hover:bg-slate-700 transition">
+                            Try Again
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
+    </div>
 
         <script>
             function uploadFunc() {
@@ -222,6 +313,51 @@
                     statusType: 'success',
                     csrfToken: '',
 
+                    // Progress tracking
+                    jobId: null,
+                    jobStatus: '',
+                    currentCount: 0,
+                    jobError: '',
+                    pollInterval: null,
+
+                    // Pipeline stages
+                    stages: [
+                        { id: 'upload', label: 'Upload' },
+                        { id: 'parsing', label: 'Parsing' },
+                        { id: 'embedding', label: 'Embedding' },
+                        { id: 'complete', label: 'Complete' }
+                    ],
+
+                    get currentStageIdx() {
+                        const stageMap = {
+                            'PENDING': 0,
+                            'UPLOADING': 0,
+                            'PARSING': 1,
+                            'EMBEDDING': 2,
+                            'COMPLETED': 3,
+                            'FAILED': Math.max(1, this._lastKnownStage || 1)
+                        };
+                        return stageMap[this.jobStatus] ?? 0;
+                    },
+
+                    get progressLineWidth() {
+                        if (this.jobStatus === 'COMPLETED') return 80;
+                        // Each stage = ~26% of the connecting line
+                        return Math.min(this.currentStageIdx * 26.7, 80);
+                    },
+
+                    get statusLine() {
+                        const lines = {
+                            'PENDING': 'Queued, waiting to start...',
+                            'UPLOADING': 'Uploading file...',
+                            'PARSING': 'Parsing conversation data...',
+                            'EMBEDDING': 'Generating embeddings for prompts...',
+                            'COMPLETED': 'Ingestion complete!',
+                            'FAILED': 'Ingestion failed'
+                        };
+                        return lines[this.jobStatus] || 'Processing...';
+                    },
+
                     async init() {
                         // Fetch CSRF token on page load
                         try {
@@ -230,6 +366,21 @@
                             this.csrfToken = data.token || data.csrf_token;
                         } catch (e) {
                             console.error('Failed to fetch CSRF token:', e);
+                        }
+
+                        // Check for active job on page load
+                        try {
+                            const res = await fetch('/api/jobs/active');
+                            const data = await res.json();
+                            if (data.active && data.job) {
+                                this.jobId = data.job.id;
+                                this.jobStatus = data.job.status;
+                                this.currentCount = data.job.current_count || 0;
+                                this.uploading = true;
+                                this.startPolling();
+                            }
+                        } catch (e) {
+                            console.error('Failed to check active job:', e);
                         }
                     },
 
@@ -246,12 +397,16 @@
                         if (!this.file) return;
 
                         this.uploading = true;
+                        this.statusMessage = '';
+                        this.jobError = '';
+                        this.jobStatus = 'UPLOADING';
+                        this._lastKnownStage = 0;
+
                         const formData = new FormData();
                         formData.append('file', this.file);
                         formData.append('provider', this.provider);
 
                         try {
-                            // Include CSRF token in headers
                             const response = await fetch('/api/ingest', {
                                 method: 'POST',
                                 headers: {
@@ -262,18 +417,73 @@
 
                             const result = await response.json();
 
-                            if (response.ok) {
-                                this.statusType = 'success';
-                                this.statusMessage = `Success! ${result.processed || 0} prompts queued.`;
+                            if (response.ok && result.job_id) {
+                                this.jobId = result.job_id;
+                                this.jobStatus = 'PENDING';
+                                this.startPolling();
                             } else {
-                                throw new Error(result.detail || result.error || 'Upload failed');
+                                throw new Error(result.detail || result.message || result.error || 'Upload failed');
                             }
                         } catch (e) {
+                            this.uploading = false;
+                            this.jobId = null;
                             this.statusType = 'error';
                             this.statusMessage = e.message;
-                        } finally {
-                            this.uploading = false;
                         }
+                    },
+
+                    startPolling() {
+                        if (this.pollInterval) clearInterval(this.pollInterval);
+                        this.pollInterval = setInterval(() => this.pollJobStatus(), 2000);
+                    },
+
+                    async pollJobStatus() {
+                        if (!this.jobId) return;
+
+                        try {
+                            const res = await fetch(`/api/jobs/${this.jobId}`);
+                            if (!res.ok) return;
+
+                            const data = await res.json();
+                            this.jobStatus = data.status;
+                            this.currentCount = data.current_count || 0;
+
+                            // Track last known stage for failure display
+                            const stageOrder = { 'PARSING': 1, 'EMBEDDING': 2 };
+                            if (stageOrder[data.status]) {
+                                this._lastKnownStage = stageOrder[data.status];
+                            }
+
+                            if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+                                clearInterval(this.pollInterval);
+                                this.pollInterval = null;
+                                this.uploading = false;
+
+                                if (data.status === 'FAILED') {
+                                    this.jobError = data.error_message || 'An unknown error occurred';
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Polling error:', e);
+                        }
+                    },
+
+                    resetUpload() {
+                        this.jobId = null;
+                        this.jobStatus = '';
+                        this.currentCount = 0;
+                        this.jobError = '';
+                        this.uploading = false;
+                        this.file = null;
+                        this.fileName = '';
+                        this.statusMessage = '';
+                        if (this.pollInterval) {
+                            clearInterval(this.pollInterval);
+                            this.pollInterval = null;
+                        }
+                        // Reset file input
+                        const input = document.getElementById('dropzone-file');
+                        if (input) input.value = '';
                     }
                 }
             }

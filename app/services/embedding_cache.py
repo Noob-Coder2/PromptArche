@@ -8,9 +8,14 @@ Solves three key problems:
 
 Architecture:
 - Cache Layer 1: In-memory LRU cache (fast, TTL-based expiry)
-- Cache Layer 2: Database (persistent across restarts)
+- Cache Layer 2: Database (persistent across restarts, shared across users)
+- Model Version: Cache entries are keyed by model name - switching models
+  auto-invalidates stale entries
 - Batch Processing: Queue embeddings, process in configurable batch sizes
 - Retry Logic: Exponential backoff on API failures
+
+Note: Embeddings are deterministic for the same input text regardless of user.
+The cache is therefore global (not user-scoped) to maximize hit rates.
 """
 
 import asyncio
@@ -19,7 +24,6 @@ import logging
 import numpy as np
 from typing import List, Optional, Dict, Tuple
 from datetime import datetime, timedelta
-from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential
 from huggingface_hub import InferenceClient
 
@@ -30,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 # HuggingFace API configuration
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
+
+# Model version for cache invalidation — changing this auto-invalidates old cache entries
+MODEL_VERSION = MODEL_NAME
 
 # Batch size for HF API (optimal: 25-50 texts per batch)
 EMBEDDING_BATCH_SIZE = 32  # Default batch size for HuggingFace API
@@ -43,6 +50,9 @@ class EmbeddingCache:
     """
     Two-layer embedding cache: in-memory LRU + database persistence.
     Supports batch processing and API call optimization.
+    
+    Cache is global (not user-scoped) because the same text always produces
+    the same embedding vector regardless of who asked it.
     """
     
     def __init__(self):
@@ -70,12 +80,6 @@ class EmbeddingCache:
         """
         Get embedding for single text with two-layer cache.
         
-        Strategy:
-        1. Check memory cache (< 1ms)
-        2. Check database cache (< 50ms)
-        3. Call API if not cached (100-500ms)
-        4. Store in both caches
-        
         Args:
             text: Text to embed
             client: Optional persistent HTTP client
@@ -85,7 +89,7 @@ class EmbeddingCache:
         """
         text_hash = self._hash_text(text)
         
-        # Layer 1: Memory cache
+        # Layer 1: Memory cache (keyed by text_hash only)
         if text_hash in self._memory_cache:
             embedding, cached_time = self._memory_cache[text_hash]
             if self._is_cache_valid(cached_time):
@@ -96,7 +100,7 @@ class EmbeddingCache:
                 # Expired, remove from memory
                 del self._memory_cache[text_hash]
         
-        # Layer 2: Database cache
+        # Layer 2: Database cache (filtered by model_version)
         embedding = await self._get_from_database(text_hash)
         if embedding:
             self._cache_hits += 1
@@ -122,117 +126,119 @@ class EmbeddingCache:
         client: Optional[InferenceClient] = None
     ) -> List[Optional[List[float]]]:
         """
-        Get embeddings for multiple texts, optimizing API calls through batching.
-        
-        Strategy:
-        1. Check cache for each text (hit/miss tracking)
-        2. Group uncached texts into batches (32 items per batch)
-        3. Call API for each batch in parallel (with rate limiting)
-        4. Cache all results (memory + database)
-        5. Return results in original order
-        
-        Optimization: A 1000-item dataset typically has 30-40% cache hit rate
-        on second ingestion. Only ~600 texts need API calls. With batching
-        (32 items/batch), this becomes 19 API calls instead of 600.
-        That's 31x fewer API calls, or ~50x faster overall.
+        Get embeddings for multiple texts with caching.
         
         Args:
             texts: List of texts to embed
             client: Optional persistent HTTP client
             
         Returns:
-            List of embeddings (None for failed items)
+            List of embedding vectors (None for failed items)
         """
         if not texts:
             return []
         
-        # Step 1: Check cache for each text
+        return await self._process_batch(texts, client)
+        
+    async def _process_batch(self, texts: List[str], client: Optional[InferenceClient]):
+        """Process a batch of texts with cache-first strategy."""
         results: List[Optional[List[float]]] = [None] * len(texts)
         uncached_indices = []
+        text_hashes = [self._hash_text(text) for text in texts]
         
-        for idx, text in enumerate(texts):
-            text_hash = self._hash_text(text)
-            
-            # Try memory cache first
+        # 1. Check Caches
+        # 1a. Batch check memory cache
+        hashes_to_lookup_db = []
+        indices_to_lookup_db = []
+        
+        for idx, text_hash in enumerate(text_hashes):
+            # Memory cache
             if text_hash in self._memory_cache:
-                embedding, cached_time = self._memory_cache[text_hash]
-                if self._is_cache_valid(cached_time):
-                    results[idx] = embedding
+                emb, time = self._memory_cache[text_hash]
+                if self._is_cache_valid(time):
+                    results[idx] = emb
                     self._cache_hits += 1
                     continue
                 else:
                     del self._memory_cache[text_hash]
             
-            # Try database cache
-            embedding = await self._get_from_database(text_hash)
-            if embedding:
-                results[idx] = embedding
-                self._memory_cache[text_hash] = (embedding, datetime.now())
-                self._cache_hits += 1
-                continue
+            # If not in memory, prepare for DB lookup
+            hashes_to_lookup_db.append(text_hash)
+            indices_to_lookup_db.append(idx)
             
-            # Not in cache: mark for API call
-            uncached_indices.append(idx)
-            self._cache_misses += 1
+        # 1b. Batch check database cache
+        if hashes_to_lookup_db:
+            db_embeddings = await self._get_batch_from_database(hashes_to_lookup_db)
+            
+            for i, text_hash in enumerate(hashes_to_lookup_db):
+                original_idx = indices_to_lookup_db[i]
+                
+                if text_hash in db_embeddings:
+                    emb = db_embeddings[text_hash]
+                    self._memory_cache[text_hash] = (emb, datetime.now())
+                    results[original_idx] = emb
+                    self._cache_hits += 1
+                else:
+                    uncached_indices.append(original_idx)
+                    self._cache_misses += 1
         
         if not uncached_indices:
             logger.info(f"Cache hit for all {len(texts)} texts")
             return results
-        
-        # Step 2-3: Batch and call API for uncached texts
-        uncached_texts = [texts[i] for i in uncached_indices]
+            
         logger.info(
             f"Batch embedding: {len(texts)} texts, "
             f"{len(uncached_indices)} cache misses ({len(results) - len(uncached_indices)} hits)"
         )
+
+        # 2. Call API for uncached
+        uncached_texts = [texts[i] for i in uncached_indices]
         
-        # Split uncached texts into batches
-        batches = [
-            uncached_texts[i:i + EMBEDDING_BATCH_SIZE]
-            for i in range(0, len(uncached_texts), EMBEDDING_BATCH_SIZE)
-        ]
+        # Batch API calls
+        # Split into smaller chunks for API stability
+        api_batch_size = EMBEDDING_BATCH_SIZE
+        batches = [uncached_texts[i:i + api_batch_size] 
+                  for i in range(0, len(uncached_texts), api_batch_size)]
         
-        # Call API for each batch in parallel (with semaphore)
-        batch_results = await asyncio.gather(
-            *[self._call_huggingface_api_batch(batch, client) for batch in batches],
-            return_exceptions=True
-        )
+        batch_results = []
+        for sub_batch in batches:
+            try:
+                # True batch API call
+                result = await self._call_huggingface_api_batch(sub_batch, client)
+                batch_results.extend(result)
+            except Exception as e:
+                logger.error(f"Sub-batch API call failed: {e}")
+                # Fill with Nones for this sub-batch
+                batch_results.extend([None] * len(sub_batch))
         
-        # Step 4: Store results in cache and update results array
-        api_call_count = 0
-        cache_rows = []  # Collect rows for single batch DB write
+        # 3. Store results
+        if len(batch_results) != len(uncached_indices):
+            logger.error(f"Mismatch in batch results: expected {len(uncached_indices)}, got {len(batch_results)}")
+            # Pad with None if needed (shouldn't happen with correct logic)
+            batch_results.extend([None] * (len(uncached_indices) - len(batch_results)))
+
+        cache_rows = []
         
-        for batch_idx, batch_embeddings in enumerate(batch_results):
-            if isinstance(batch_embeddings, Exception):
-                logger.error(f"Batch {batch_idx} failed: {batch_embeddings}")
+        for i, embedding in enumerate(batch_results):
+            if embedding is None:
                 continue
+                
+            global_idx = uncached_indices[i]
+            results[global_idx] = embedding
             
-            if not isinstance(batch_embeddings, list) or batch_embeddings is None:
-                continue
+            text_hash = text_hashes[global_idx]
             
-            for local_idx, embedding in enumerate(batch_embeddings):
-                if embedding is None:
-                    continue
+            self._memory_cache[text_hash] = (embedding, datetime.now())
+            cache_rows.append({
+                "text_hash": text_hash,
+                "embedding": embedding,
+                "model_version": MODEL_VERSION,
+                "created_at": datetime.now().isoformat()
+            })
                 
-                global_idx = uncached_indices[api_call_count]
-                results[global_idx] = embedding
-                
-                # Store in memory cache immediately
-                text_hash = self._hash_text(texts[global_idx])
-                self._memory_cache[text_hash] = (embedding, datetime.now())
-                # Collect for batch DB write
-                cache_rows.append({
-                    "text_hash": text_hash,
-                    "embedding": embedding,
-                    "created_at": datetime.now().isoformat()
-                })
-                
-                api_call_count += 1
-        
-        # Single batch DB write (1 connection instead of N)
         if cache_rows:
             await self._store_batch_in_database(cache_rows)
-        
+            
         return results
     
     @retry(
@@ -258,24 +264,45 @@ class EmbeddingCache:
                 )
                 
                 self._api_calls += 1
-                
-                # Convert numpy array to list if needed
-                if isinstance(embedding, np.ndarray):
-                    return embedding.tolist()
-                elif isinstance(embedding, list):
-                    # Handle nested list structure
-                    if len(embedding) > 0 and isinstance(embedding[0], (list, np.ndarray)):
-                        first_item = embedding[0]
-                        if isinstance(first_item, np.ndarray):
-                            return first_item.tolist()
-                        return first_item
-                    return embedding
-                
-                logger.error(f"Unexpected embedding format: {type(embedding)}")
-                return None
+                return self._normalize_embedding(embedding)
             except Exception as e:
                 logger.error(f"API call failed: {e}")
                 raise
+    
+    @staticmethod
+    def _normalize_embedding(embedding) -> Optional[List[float]]:
+        """
+        Normalize embedding output to a flat list of native Python floats.
+        
+        Handles all possible return formats from HuggingFace InferenceClient:
+        - numpy ndarray (1D or 2D)
+        - nested Python lists
+        - numpy scalar types (float32/float64)
+        
+        This is critical because pgvector columns require native Python floats
+        for proper JSON serialization by the Supabase client.
+        """
+        if embedding is None:
+            return None
+        
+        # Convert numpy array to flat list
+        if isinstance(embedding, np.ndarray):
+            flat = embedding.flatten().tolist()  # .tolist() on ndarray gives native Python types
+            return [float(x) for x in flat]
+        
+        # Handle nested list/array structures  
+        if isinstance(embedding, list):
+            # Flatten if nested: [[0.1, 0.2, ...]] -> [0.1, 0.2, ...]
+            if len(embedding) > 0 and isinstance(embedding[0], (list, np.ndarray)):
+                first = embedding[0]
+                if isinstance(first, np.ndarray):
+                    return [float(x) for x in first.flatten().tolist()]
+                return [float(x) for x in first]
+            # Already flat list — ensure native Python floats
+            return [float(x) for x in embedding]
+        
+        logger.error(f"Unexpected embedding format: {type(embedding)}")
+        return None
     
     @retry(
         stop=stop_after_attempt(3),
@@ -287,32 +314,53 @@ class EmbeddingCache:
         client: Optional[InferenceClient] = None
     ) -> List[Optional[List[float]]]:
         """
-        Call HuggingFace API for batch of texts using InferenceClient.
-        
-        Note: InferenceClient doesn't support batch processing natively,
-        so we process texts individually with concurrent execution.
+        Call HuggingFace API for batch of texts efficiently.
+        Uses a single HTTP request for multiple texts.
         """
         if client is None:
             client = self._hf_client
-        
-        # Process batch as concurrent individual requests
-        tasks = [self._call_huggingface_api(text, client) for text in texts]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Convert exceptions to None
-        return [
-            result if not isinstance(result, Exception) else None
-            for result in results
-        ]
+
+        try:
+            # Use run_in_executor because feature_extraction is synchronous
+            loop = asyncio.get_event_loop()
+            
+            # The API supports passing a list of strings
+            embeddings = await loop.run_in_executor(
+                None,
+                lambda: client.feature_extraction(texts, model=MODEL_NAME)
+            )
+            
+            # Normalize results
+            normalized_results = []
+            
+            # When passing a list, the result is usually a list (or ndarray) of embeddings
+            if isinstance(embeddings, (list, np.ndarray)):
+                # If it's a list of results, process each one
+                for emb in embeddings:
+                     normalized_results.append(self._normalize_embedding(emb))
+            else:
+                # Unexpected result structure
+                logger.error(f"Unexpected batch API result type: {type(embeddings)}")
+                return [None] * len(texts)
+                
+            self._api_calls += 1  # Count as 1 API call (batch)
+            return normalized_results
+            
+        except Exception as e:
+            logger.warning(f"Batch embedding API call failed: {e}")
+            # If batch fails, we could fallback to individual or just return None
+            # Returning None allows retry logic to kick in at a higher level if needed
+            return [None] * len(texts)
+    
     
     async def _get_from_database(self, text_hash: str) -> Optional[List[float]]:
-        """Retrieve embedding from database cache."""
+        """Retrieve embedding from database cache, filtered by current model version."""
         try:
             supabase = get_supabase()
             response = supabase.table("embedding_cache").select(
                 "embedding"
-            ).eq("text_hash", text_hash).order(
-                "created_at", desc=True
+            ).eq("text_hash", text_hash).eq(
+                "model_version", MODEL_VERSION
             ).limit(1).execute()
             
             if response and hasattr(response, 'data') and isinstance(response.data, list) and len(response.data) > 0:
@@ -325,6 +373,34 @@ class EmbeddingCache:
         except Exception as e:
             logger.warning(f"Database cache read failed: {e}")
             return None
+
+    async def _get_batch_from_database(self, text_hashes: List[str]) -> Dict[str, List[float]]:
+        """Retrieve multiple embeddings from database cache in a single query."""
+        if not text_hashes:
+            return {}
+            
+        try:
+            supabase = get_supabase()
+            # Use .in_() for batch lookup
+            response = supabase.table("embedding_cache").select(
+                "text_hash, embedding"
+            ).in_("text_hash", text_hashes).eq(
+                "model_version", MODEL_VERSION
+            ).execute()
+            
+            result_map = {}
+            if response and hasattr(response, 'data') and isinstance(response.data, list):
+                for item in response.data:
+                    if isinstance(item, dict):
+                        th = item.get("text_hash")
+                        emb = item.get("embedding")
+                        if th and isinstance(emb, list):
+                            result_map[th] = emb
+                            
+            return result_map
+        except Exception as e:
+            logger.warning(f"Database batch cache read failed: {e}")
+            return {}
     
     async def _store_in_database(self, text_hash: str, embedding: List[float]):
         """Store single embedding in database cache."""
@@ -333,19 +409,24 @@ class EmbeddingCache:
             supabase.table("embedding_cache").upsert({
                 "text_hash": text_hash,
                 "embedding": embedding,
+                "model_version": MODEL_VERSION,
                 "created_at": datetime.now().isoformat()
-            }, on_conflict="text_hash").execute()
+            }, on_conflict="text_hash,model_version").execute()
         except Exception as e:
             logger.warning(f"Database cache write failed: {e}")
     
     async def _store_batch_in_database(self, rows: List[Dict]):
         """Store multiple embeddings in database cache with a single upsert."""
         try:
+            # Deduplicate by text_hash to be safe
+            unique_rows = {row["text_hash"]: row for row in rows}
+            deduped = list(unique_rows.values())
+            
             supabase = get_supabase()
             supabase.table("embedding_cache").upsert(
-                rows, on_conflict="text_hash"
+                deduped, on_conflict="text_hash,model_version"
             ).execute()
-            logger.debug(f"Batch-cached {len(rows)} embeddings to database")
+            logger.debug(f"Batch-cached {len(deduped)} embeddings to database (from {len(rows)} total)")
         except Exception as e:
             logger.warning(f"Database cache batch write failed ({len(rows)} rows): {e}")
     
@@ -359,7 +440,8 @@ class EmbeddingCache:
             "cache_misses": self._cache_misses,
             "hit_rate_percent": round(hit_rate, 2),
             "api_calls": self._api_calls,
-            "memory_cache_size": len(self._memory_cache)
+            "memory_cache_size": len(self._memory_cache),
+            "model_version": MODEL_VERSION
         }
     
     def clear_cache(self):
