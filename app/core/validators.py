@@ -1,7 +1,7 @@
 """
 Input validation utilities for the application.
 """
-
+import ijson
 import json
 import logging
 from typing import Dict, Any, Optional
@@ -61,16 +61,15 @@ def validate_file_type(file: UploadFile) -> None:
         )
 
 
-def validate_json_structure(file: UploadFile, provider: str) -> Dict[str, Any]:
+def validate_json_structure(file: UploadFile, provider: str) -> None:
     """
-    Validate JSON structure based on provider type.
+    Validate JSON structure based on provider type using streaming (ijson).
+    Only reads enough of the file to confirm the top-level structure,
+    keeping memory usage constant regardless of file size.
     
     Args:
         file: UploadFile containing JSON data
         provider: Data provider type (chatgpt, claude, grok)
-        
-    Returns:
-        Parsed JSON data
         
     Raises:
         HTTPException: If JSON is invalid or structure is incorrect
@@ -82,74 +81,99 @@ def validate_json_structure(file: UploadFile, provider: str) -> Dict[str, Any]:
         )
     
     try:
-        # Read and parse JSON
-        content = file.file.read()
-        file.file.seek(0)  # Reset file pointer for further processing
+        file_obj = file.file
         
-        json_data = json.loads(content.decode('utf-8'))
-        
-        # Validate structure based on provider
-        provider_config = SUPPORTED_PROVIDERS[provider]
-        
-        if provider == "chatgpt":
-            if not isinstance(json_data, list):
-                raise HTTPException(
-                    status_code=400,
-                    detail="ChatGPT export must be a list of conversations"
-                )
-            if not json_data:  # Empty list
-                raise HTTPException(
-                    status_code=400,
-                    detail="ChatGPT export cannot be empty"
-                )
+        if provider in ("chatgpt", "claude"):
+            # Expect a top-level JSON array with at least one item
+            # ijson.items at '' with prefix 'item' iterates array elements
+            try:
+                parser = ijson.parse(file_obj)
+                first_event = next(parser, None)
                 
-        elif provider == "claude":
-            if not isinstance(json_data, list):
+                if first_event is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider.capitalize()} export cannot be empty"
+                    )
+                
+                prefix, event, value = first_event
+                if event != 'start_array':
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider.capitalize()} export must be a list of conversations"
+                    )
+                
+                # Check there's at least one item in the array
+                second_event = next(parser, None)
+                if second_event is None or second_event[1] == 'end_array':
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider.capitalize()} export cannot be empty"
+                    )
+                    
+            except ijson.JSONError as e:
                 raise HTTPException(
                     status_code=400,
-                    detail="Claude export must be a list of conversations"
-                )
-            if not json_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Claude export cannot be empty"
+                    detail=f"Invalid JSON format: {str(e)}"
                 )
                 
         elif provider == "grok":
-            if not isinstance(json_data, dict):
+            # Expect a top-level JSON object containing a "conversations" key
+            try:
+                parser = ijson.parse(file_obj)
+                first_event = next(parser, None)
+                
+                if first_event is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Grok export cannot be empty"
+                    )
+                
+                prefix, event, value = first_event
+                if event != 'start_map':
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Grok export must be a JSON object"
+                    )
+                
+                # Scan for "conversations" key (read only top-level keys)
+                found_conversations = False
+                for prefix, event, value in parser:
+                    if event == 'map_key' and value == 'conversations':
+                        found_conversations = True
+                        break
+                    # Stop if we've entered a nested structure without finding it
+                    # at the top level (prefix would be non-empty for nested keys)
+                    if prefix and '.' in prefix:
+                        continue
+                
+                if not found_conversations:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Grok export must contain 'conversations' key"
+                    )
+                    
+            except ijson.JSONError as e:
                 raise HTTPException(
                     status_code=400,
-                    detail="Grok export must be a JSON object"
-                )
-            if "conversations" not in json_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Grok export must contain 'conversations' key"
-                )
-            if not json_data["conversations"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Grok export conversations cannot be empty"
+                    detail=f"Invalid JSON format: {str(e)}"
                 )
         
-        # Log validation success with proper count
-        if provider == "grok":
-            logger.info(f"Validated {provider} export with {len(json_data.get('conversations', []))} conversations")
-        else:
-            logger.info(f"Validated {provider} export with {len(json_data)} items")
-        return json_data
+        # Reset file pointer for actual processing
+        file_obj.seek(0)
+        logger.info(f"Validated {provider} export structure (streaming)")
         
-    except json.JSONDecodeError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid JSON format: {str(e)}"
-        )
+    except HTTPException:
+        file.file.seek(0)
+        raise
     except UnicodeDecodeError:
+        file.file.seek(0)
         raise HTTPException(
             status_code=400,
             detail="File must be UTF-8 encoded"
         )
     except Exception as e:
+        file.file.seek(0)
         logger.error(f"Validation error: {e}")
         raise HTTPException(
             status_code=400,

@@ -266,15 +266,14 @@ class IngestionService:
     
     # --- Ingestion Methods ---
     @staticmethod
-    def ingest_sync(
+    async def ingest_async(
         file_obj: IO,
         provider: str,
         user_id: str,
         job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Synchronous streaming ingestion to be run in a thread pool.
-        Designed to be called from async context via executor.
+        Async streaming ingestion pipeline.
         Processes large files without loading entire content into memory.
         
         Features:
@@ -333,7 +332,7 @@ class IngestionService:
                     
                     try:
                         # Generate embeddings in batch (50-100x faster than sequential)
-                        IngestionService._flush_buffer_with_embeddings(
+                        await IngestionService._flush_buffer_with_embeddings(
                             supabase, prompts_buffer, batch_num
                         )
                         success_count += batch_count
@@ -358,7 +357,7 @@ class IngestionService:
                 batch_count = len(prompts_buffer)
                 
                 try:
-                    IngestionService._flush_buffer_with_embeddings(
+                    await IngestionService._flush_buffer_with_embeddings(
                         supabase, prompts_buffer, batch_num
                     )
                     success_count += batch_count
@@ -463,7 +462,7 @@ class IngestionService:
             raise
 
     @staticmethod
-    def _flush_buffer_with_embeddings(
+    async def _flush_buffer_with_embeddings(
         supabase,
         batch: List[Dict[str, Any]],
         batch_num: Optional[int] = None
@@ -471,19 +470,14 @@ class IngestionService:
         """
         Flush buffer to database WITH BATCH EMBEDDING GENERATION.
         
-        Optimization: Uses batch embedding API instead of sequential calls.
-        This is 50-100x faster for typical datasets.
+        Fully async: awaits embedding generation, then runs the sync DB
+        insert via run_in_executor to avoid blocking the event loop.
         
         Flow:
         1. Extract content from each prompt
-        2. Call HF API with batch (e.g., 32 items in 1 API call)
+        2. Await batch embedding API call (with caching)
         3. Match embeddings back to prompts
-        4. Store with embeddings in database
-        
-        Cache Strategy:
-        - Check cache first for each text (30-50% hit rate typical)
-        - Only call API for uncached items
-        - Store results in both memory cache and database
+        4. Store with embeddings in database (via executor)
         
         Args:
             supabase: Supabase client instance
@@ -494,41 +488,41 @@ class IngestionService:
             # Extract content for embedding
             texts = [item["content"] for item in batch]
             
-            # Get embeddings in batch (with caching)
-            # This runs synchronously but internally uses async for concurrency
-            embeddings = asyncio.run(_get_embeddings_batch(texts))
+            # Await embeddings directly (no asyncio.run needed)
+            embeddings = await get_cached_embeddings_batch(texts)
             
-            # Attach embeddings to items
+            # Attach embeddings to items (convert to pgvector string format)
             for i, item in enumerate(batch):
                 if i < len(embeddings) and embeddings[i] is not None:
-                    item["embedding"] = embeddings[i]
+                    # pgvector expects string format: "[0.1,0.2,...]"
+                    emb = embeddings[i]
+                    if isinstance(emb, list):
+                        item["embedding"] = "[" + ",".join(str(v) for v in emb) + "]"
+                    else:
+                        item["embedding"] = emb
                 else:
                     logger.warning(f"Failed to get embedding for item {i}, storing without embedding")
             
-            # Insert with embeddings
-            IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
+            # Run sync DB insert in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                IngestionService._flush_buffer_with_retry,
+                supabase, batch, batch_num
+            )
             
         except Exception as e:
             batch_info = f" (batch {batch_num})" if batch_num else ""
             logger.error(f"Embedding batch generation failed{batch_info}: {e}")
             # Fall back to inserting without embeddings
             try:
-                IngestionService._flush_buffer_with_retry(supabase, batch, batch_num)
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    IngestionService._flush_buffer_with_retry,
+                    supabase, batch, batch_num
+                )
                 logger.info(f"Batch {batch_num} inserted without embeddings (fallback)")
             except Exception as fallback_e:
                 logger.error(f"Fallback flush also failed: {fallback_e}")
                 raise
-
-    @staticmethod
-    def _flush_buffer(supabase, batch):
-        """Legacy method for backward compatibility."""
-        IngestionService._flush_buffer_with_retry(supabase, batch)
-
-
-# Helper function to run async embeddings from sync context
-async def _get_embeddings_batch(texts: List[str]) -> List[Optional[List[float]]]:
-    """
-    Helper function to get embeddings for a batch of texts.
-    Uses the caching service with intelligent batching.
-    """
-    return await get_cached_embeddings_batch(texts)

@@ -200,6 +200,8 @@ class EmbeddingCache:
         
         # Step 4: Store results in cache and update results array
         api_call_count = 0
+        cache_rows = []  # Collect rows for single batch DB write
+        
         for batch_idx, batch_embeddings in enumerate(batch_results):
             if isinstance(batch_embeddings, Exception):
                 logger.error(f"Batch {batch_idx} failed: {batch_embeddings}")
@@ -215,12 +217,21 @@ class EmbeddingCache:
                 global_idx = uncached_indices[api_call_count]
                 results[global_idx] = embedding
                 
-                # Store in caches
+                # Store in memory cache immediately
                 text_hash = self._hash_text(texts[global_idx])
                 self._memory_cache[text_hash] = (embedding, datetime.now())
-                asyncio.create_task(self._store_in_database(text_hash, embedding))
+                # Collect for batch DB write
+                cache_rows.append({
+                    "text_hash": text_hash,
+                    "embedding": embedding,
+                    "created_at": datetime.now().isoformat()
+                })
                 
                 api_call_count += 1
+        
+        # Single batch DB write (1 connection instead of N)
+        if cache_rows:
+            await self._store_batch_in_database(cache_rows)
         
         return results
     
@@ -316,7 +327,7 @@ class EmbeddingCache:
             return None
     
     async def _store_in_database(self, text_hash: str, embedding: List[float]):
-        """Store embedding in database cache."""
+        """Store single embedding in database cache."""
         try:
             supabase = get_supabase()
             supabase.table("embedding_cache").upsert({
@@ -326,6 +337,17 @@ class EmbeddingCache:
             }, on_conflict="text_hash").execute()
         except Exception as e:
             logger.warning(f"Database cache write failed: {e}")
+    
+    async def _store_batch_in_database(self, rows: List[Dict]):
+        """Store multiple embeddings in database cache with a single upsert."""
+        try:
+            supabase = get_supabase()
+            supabase.table("embedding_cache").upsert(
+                rows, on_conflict="text_hash"
+            ).execute()
+            logger.debug(f"Batch-cached {len(rows)} embeddings to database")
+        except Exception as e:
+            logger.warning(f"Database cache batch write failed ({len(rows)} rows): {e}")
     
     def get_cache_stats(self) -> Dict[str, int | float]:
         """Return cache statistics for monitoring."""

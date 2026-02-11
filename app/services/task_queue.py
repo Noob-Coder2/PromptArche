@@ -226,12 +226,9 @@ class TaskQueueService:
             raise ValueError("Missing required job data: file_path, provider")
         
         try:
-            # Run synchronous ingestion in thread pool (non-blocking)
-            loop = asyncio.get_event_loop()
+            # Run async ingestion directly (fully async pipeline)
             with open(file_path, 'rb') as f:
-                result = await loop.run_in_executor(
-                    None,
-                    IngestionService.ingest_sync,
+                result = await IngestionService.ingest_async(
                     f,
                     provider,
                     user_id,

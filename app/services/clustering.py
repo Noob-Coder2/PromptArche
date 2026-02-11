@@ -72,7 +72,7 @@ def run_clustering_for_user(user_id: UUID) -> Dict[str, Any]:
     validation = validate_clustering_parameters(
         params.min_cluster_size,
         params.min_samples,
-        n_samples
+        n_samples=len(embeddings)
     )
     
     if not validation["is_valid"]:
@@ -155,25 +155,49 @@ def run_clustering_for_user(user_id: UUID) -> Dict[str, Any]:
             logger.info(f"Orphaned cluster: {existing['label']} (id: {existing['id']})")
             orphaned_count += 1
     
-    # 7. Update prompts with cluster assignments
+    # 7. Batch update prompts with cluster assignments
     noise_count = 0
     assigned_count = 0
+    
+    # Collect noise and assigned prompt IDs
+    noise_ids = []
+    # Group assigned prompts by cluster UUID for batch updates
+    cluster_assignments: Dict[str, list] = {}  # cluster_uuid -> [prompt_ids]
     
     for idx, prompt_id in enumerate(ids):
         label = cluster_labels[idx]
         
         if label == -1:
-            # Handle noise - flag as unclustered for future re-clustering
-            _mark_prompt_unclustered(supabase, prompt_id)
+            noise_ids.append(prompt_id)
             noise_count += 1
         else:
             cluster_uuid = cluster_map.get(label)
             if cluster_uuid:
-                supabase.table("prompts").update({
-                    "cluster_id": cluster_uuid,
-                    "metadata": {"unclustered": False}
-                }).eq("id", prompt_id).execute()
+                if cluster_uuid not in cluster_assignments:
+                    cluster_assignments[cluster_uuid] = []
+                cluster_assignments[cluster_uuid].append(prompt_id)
                 assigned_count += 1
+    
+    # Batch update: mark noise prompts as unclustered (single DB call)
+    if noise_ids:
+        try:
+            supabase.table("prompts").update({
+                "cluster_id": None,
+                "metadata": {"unclustered": True}
+            }).in_("id", noise_ids).execute()
+            logger.info(f"Batch-marked {len(noise_ids)} prompts as unclustered")
+        except Exception as e:
+            logger.warning(f"Failed to batch-mark noise prompts: {e}")
+    
+    # Batch update: assign prompts to clusters (one call per cluster)
+    for cluster_uuid, prompt_ids in cluster_assignments.items():
+        try:
+            supabase.table("prompts").update({
+                "cluster_id": cluster_uuid,
+                "metadata": {"unclustered": False}
+            }).in_("id", prompt_ids).execute()
+        except Exception as e:
+            logger.warning(f"Failed to batch-assign prompts to cluster {cluster_uuid}: {e}")
     
     total_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
     
@@ -238,27 +262,6 @@ def _find_matching_cluster(
         logger.debug(f"Matched cluster {best_match['label']} with similarity {best_similarity:.3f}")
     
     return best_match
-
-
-def _mark_prompt_unclustered(supabase, prompt_id: str):
-    """
-    Mark a prompt as unclustered (noise) for future re-clustering.
-    Preserves the data for when the dataset grows and new patterns emerge.
-    """
-    try:
-        # Get current metadata
-        res = supabase.table("prompts").select("metadata").eq("id", prompt_id).execute()
-        current_metadata = res.data[0].get("metadata", {}) if res.data else {}
-        
-        # Update with unclustered flag
-        updated_metadata = {**current_metadata, "unclustered": True}
-        
-        supabase.table("prompts").update({
-            "cluster_id": None,
-            "metadata": updated_metadata
-        }).eq("id", prompt_id).execute()
-    except Exception as e:
-        logger.warning(f"Failed to mark prompt {prompt_id} as unclustered: {e}")
 
 
 def get_unclustered_prompts(user_id: str, limit: int = 100) -> List[Dict]:

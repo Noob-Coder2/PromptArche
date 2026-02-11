@@ -138,14 +138,14 @@ async def get_queue_stats(user_id: str = Depends(get_current_user_id), _: None =
     return stats
 
 
-def process_upload_background(
+async def process_upload_background(
     file_path: str,
     provider: str,
     user_id: str,
     job_id: str
 ):
     """
-    DEPRECATED: Legacy synchronous background task.
+    DEPRECATED: Legacy background task.
     
     This function is kept for backward compatibility but should not be used.
     Use TaskQueueService.enqueue_job() instead for async processing.
@@ -154,9 +154,9 @@ def process_upload_background(
     """
     try:
         with open(file_path, 'rb') as f:
-            IngestionService.ingest_sync(f, provider, user_id, job_id)
+            await IngestionService.ingest_async(f, provider, user_id, job_id)
     except Exception as e:
-        # Job failure is handled inside ingest_sync, but catch any other errors
+        # Job failure is handled inside ingest_async, but catch any other errors
         import logging
         logging.getLogger(__name__).error(f"Background ingestion error: {e}")
         IngestionJobService.fail_job(job_id, str(e))
