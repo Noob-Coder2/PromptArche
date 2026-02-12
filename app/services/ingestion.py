@@ -471,6 +471,10 @@ class IngestionService:
             # Uniqueness is enforced by (user_id, source, external_id) constraint.
             # This allows duplicate CONTENT (same prompt text) but prevents duplicate EVENTS.
             try:
+                # DEBUG: Check if embedding leaked
+                if batch and "embedding" in batch[0]:
+                    logger.error("CRITICAL: 'embedding' key FOUND in batch sent to insert!")
+                
                 result = supabase.table("prompts").insert(batch).execute()
                 if batch_num:
                     logger.debug(f"Successfully flushed batch {batch_num} with {len(batch)} items")
@@ -499,70 +503,87 @@ class IngestionService:
     ):
         """
         Hybrid pipeline:
-        1. Check DB cache for embeddings
-        2. Store batch immediately (cache hits have embeddings, misses have None)
-        3. Queue background task to generate embeddings for misses
+        1. Store prompts immediately WITHOUT embeddings
+        2. Queue background task to generate embeddings (stored in embedding_cache)
+        3. Background task calls server-side RPC to copy embeddings from cache → prompts
         
-        This ensures immediate data visibility while optimizing embedding throughput.
+        Embeddings NEVER travel through the REST API for the prompts table.
+        This avoids PostgREST bytea serialization issues with vector columns.
         """
         batch_info = f" (batch {batch_num})"
         
-        # --- Phase 1: Check Cache (Fast DB Read) ---
-        # We need to compute hashes to lookup in DB cache
-        from app.services.embedding_cache import get_embedding_cache
-        cache_service = get_embedding_cache()
+        # --- Phase 1: Store Prompts (Immediate Insert, NO embedding) ---
+        # Strip embedding field from all items — embeddings are handled server-side later
+        insert_batch = []
         
-        texts = [item["content"] for item in batch]
-        text_hashes = [cache_service._hash_text(text) for text in texts]
+        # Helper to extract checkable IDs
+        check_ids = [item["external_id"] for item in batch if item.get("external_id")]
+        existing_ids = set()
         
-        # Batch lookup in cache table
-        cached_embeddings = await cache_service._get_batch_from_database(text_hashes)
-        
-        # Prepare batch for insertion
-        items_needing_embedding = []
-        
-        for i, item in enumerate(batch):
-            th = text_hashes[i]
-            if th in cached_embeddings:
-                item["embedding"] = cached_embeddings[th]
-            else:
-                item["embedding"] = None
-                items_needing_embedding.append(item)
-        
-        cache_hit_count = len(batch) - len(items_needing_embedding)
-        logger.debug(f"Batch{batch_info}: dry-run cache hit {cache_hit_count}/{len(batch)}")
-
-        # --- Phase 2: Store Prompts (Immediate Insert) ---
-        # Insert everything in one go. Items needing embedding have NULL embedding column for now.
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                IngestionService._flush_buffer_with_retry,
-                supabase, batch, batch_num
-            )
-        except Exception as e:
-            logger.error(f"Failed to store batch{batch_info}: {e}")
-            raise
-
-        # --- Phase 3: Background Embed (Concurrent Task) ---
-        if items_needing_embedding:
-            # Create a background task for just the gaps
-            task = asyncio.create_task(
-                IngestionService._process_embeddings_gap(
-                    supabase, 
-                    items_needing_embedding, 
-                    user_id, 
-                    batch_num, 
-                    semaphore
-                )
-            )
-            # Add to tracking set
-            background_tasks.add(task)
-            # Remove from set when done
-            task.add_done_callback(background_tasks.discard)
+        # Pre-fetch existing IDs to avoid batch failure on duplicates
+        if check_ids:
+            try:
+                # We assume batch is from same user. Check uniqueness on (user_id, external_id)
+                # Note: Theoretical edge case if source differs, but usually consistent in upload.
+                existing_res = supabase.table("prompts").select("external_id") \
+                    .eq("user_id", user_id) \
+                    .in_("external_id", check_ids) \
+                    .execute()
+                existing_ids = {row["external_id"] for row in existing_res.data}
+                if existing_ids:
+                    logger.info(f"Batch {batch_num}: Found {len(existing_ids)} duplicates, skipping them.")
+            except Exception as e:
+                logger.warning(f"Failed to check duplicates for batch {batch_num}: {e}")
+                
+        for item in batch:
+            # Skip if already exists
+            if item.get("external_id") in existing_ids:
+                continue
+                
+            insert_item = {k: v for k, v in item.items() if k != "embedding"}
             
-            logger.debug(f"Batch{batch_info}: Queued background embedding for {len(items_needing_embedding)} items")
+            # WORKAROUND: Postgres/Supabase trigger seems to fail on backslashes in content 
+            # (likely casting to bytea for hash generation incorrectly).
+            # We strip backslashes to prevent "invalid input syntax for type bytea".
+            if "content" in insert_item and isinstance(insert_item["content"], str):
+                insert_item["content"] = insert_item["content"].replace("\\", "")
+                
+            insert_batch.append(insert_item)
+        
+        if not insert_batch:
+            logger.info(f"Batch {batch_num}: All items were duplicates. Skipping insert.")
+            # We still proceed to background tasks to ensure embeddings exist (idempotent)
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    IngestionService._flush_buffer_with_retry,
+                    supabase, insert_batch, batch_num
+                )
+            except Exception as e:
+                logger.error(f"Failed to store batch{batch_info}: {e}")
+                raise
+
+        # --- Phase 2: Background Embed + Server-Side Backfill ---
+        # Queue a background task that:
+        #   1. Generates embeddings via HF API (results stored in embedding_cache)
+        #   2. Calls server-side RPC to copy from embedding_cache → prompts
+        task = asyncio.create_task(
+            IngestionService._process_embeddings_gap(
+                supabase, 
+                batch,  # Pass all items — cache service handles hits/misses efficiently
+                user_id, 
+                batch_num, 
+                semaphore
+            )
+        )
+        # Add to tracking set
+        background_tasks.add(task)
+        # Remove from set when done
+        task.add_done_callback(background_tasks.discard)
+        
+        logger.debug(f"Batch{batch_info}: Queued background embedding for {len(batch)} items")
 
     @staticmethod
     async def _process_embeddings_gap(
@@ -573,49 +594,47 @@ class IngestionService:
         semaphore: asyncio.Semaphore
     ):
         """
-        Background task to fill in missing embeddings.
+        Background task to generate embeddings and backfill them server-side.
+        
+        Flow:
+        1. Call get_cached_embeddings_batch → generates via HF API for misses,
+           stores ALL results in embedding_cache table automatically
+        2. Call server-side RPC to copy embeddings from embedding_cache → prompts
+           (vectors never travel through PostgREST)
+        
         Respects concurrency limit via semaphore.
         """
         async with semaphore:
             batch_info = f" (BG batch {batch_num})"
             try:
-                # 1. Generate Embeddings (API Call)
+                # 1. Generate Embeddings (API Call + Cache Storage)
+                # get_cached_embeddings_batch handles:
+                #   - Memory cache check
+                #   - DB cache check  
+                #   - HF API call for misses
+                #   - Storing results in embedding_cache table
                 texts = [item["content"] for item in items]
-                
-                # We use get_cached_embeddings_batch again, even though we know they were missing from DB.
-                # Why? Because:
-                # 1. It handles the API call + Retry logic
-                # 2. It handles memory cache (which might have it if we just processed duplicate text)
-                # 3. It automatically updates the cache table for us
                 embeddings = await get_cached_embeddings_batch(texts)
                 
-                # 2. Update Prompts table with new embeddings
-                update_count = 0
-                for i, embedding in enumerate(embeddings):
-                    if embedding:
-                        try:
-                            # Update specific row
-                            # Use internal API or raw query for efficiency? 
-                            # Supabase client is fine for now; we optimized the heavy insert already.
-                            # But wait! We don't want N updates again if we can help it.
-                            # However, 'update' only updates one row at a time in Supabase unless we use specific filters.
-                            # Given this is background, N updates is acceptable as it doesn't block the user.
-                            # AND we are limited by semaphore (4 concurrent updates tasks).
-                            
-                            # Note: In a true high-scale PG system, we'd use unnest() to batch update.
-                            # For now, simplistic loop is safer to implement quickly.
-                            
-                            supabase.table("prompts").update({
-                                "embedding": embedding
-                            }).eq("user_id", user_id).eq(
-                                "content", items[i]["content"]
-                            ).execute()
-                            
-                            update_count += 1
-                        except Exception as ue:
-                            logger.warning(f"Failed to backfill embedding{batch_info} item {i}: {ue}")
-                            
-                logger.info(f"Background{batch_info}: Backfilled {update_count}/{len(items)} embeddings")
+                generated_count = sum(1 for e in embeddings if e is not None)
+                logger.info(f"Background{batch_info}: Generated {generated_count}/{len(items)} embeddings")
+                
+                # 2. Server-Side Backfill: Copy from embedding_cache → prompts via RPC
+                # This runs entirely inside PostgreSQL — no vectors through PostgREST
+                try:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: supabase.rpc(
+                            'backfill_embeddings_from_cache',
+                            {'target_user_id': user_id}
+                        ).execute()
+                    )
+                    
+                    backfilled = result.data if result and hasattr(result, 'data') else 0
+                    logger.info(f"Background{batch_info}: Server-side backfill updated {backfilled} prompts")
+                except Exception as rpc_err:
+                    logger.warning(f"RPC backfill failed{batch_info}: {rpc_err}")
                 
             except Exception as e:
                 logger.error(f"Background task failed{batch_info}: {e}")

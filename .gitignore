@@ -52,6 +52,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+pytest.ini
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -84,3 +85,6 @@ Documentation
 Documentation/
 unsolved.md
 tests/
+
+# Debug scripts
+debug_scripts/
