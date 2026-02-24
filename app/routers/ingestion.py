@@ -89,6 +89,22 @@ async def ingest_file(
     }
 
 
+@router.get("/api/jobs/active")
+async def get_active_job(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
+    """Get the currently active ingestion job, if any."""
+    job = IngestionJobService.get_active_job(user_id)
+    if job:
+        return {"active": True, "job": job}
+    return {"active": False, "job": None}
+
+
+@router.get("/api/jobs/stats")
+async def get_queue_stats(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
+    """Get task queue statistics (queue size, active tasks)."""
+    stats = await TaskQueueService.get_queue_stats()
+    return stats
+
+
 @router.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str, user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
     """
@@ -116,26 +132,6 @@ async def get_job_status(job_id: str, user_id: str = Depends(get_current_user_id
 
 
 @router.get("/api/jobs")
-async def get_user_jobs(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
-    """Get recent ingestion jobs for the current user."""
-    jobs = IngestionJobService.get_user_jobs(user_id, limit=10)
-    return {"jobs": jobs}
-
-
-@router.get("/api/jobs/active")
-async def get_active_job(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
-    """Get the currently active ingestion job, if any."""
-    job = IngestionJobService.get_active_job(user_id)
-    if job:
-        return {"active": True, "job": job}
-    return {"active": False, "job": None}
-
-
-@router.get("/api/jobs/stats")
-async def get_queue_stats(user_id: str = Depends(get_current_user_id), _: None = Depends(rate_limit)):
-    """Get task queue statistics (queue size, active tasks)."""
-    stats = await TaskQueueService.get_queue_stats()
-    return stats
 
 
 async def process_upload_background(

@@ -150,9 +150,10 @@ def get_db_status(request: Request):
 # We can just extend the base template to check `request.app.state.db_ready`.
 # FastAPI allows accessing `request.app` inside Jinja if request is passed.
 
-from app.routers import auth, ingestion, dashboard, pages, health
+from app.routers import auth, ingestion, dashboard, pages, health, pipeline
 app.include_router(auth.router)
 app.include_router(ingestion.router)
 app.include_router(dashboard.router)
 app.include_router(pages.router)
 app.include_router(health.router, prefix="/api")
+app.include_router(pipeline.router)

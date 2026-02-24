@@ -334,27 +334,31 @@ class IngestionService:
                 if len(prompts_buffer) >= settings.BATCH_SIZE:
                     batch_num += 1
                     batch_count = len(prompts_buffer)
-                    
                     try:
-                        # Hybrid Store & Background Embed
-                        # Checks cache, stores prompts, and queues background embedding for misses
-                        await IngestionService._flush_buffer_hybrid(
-                            supabase, 
-                            prompts_buffer, 
-                            str(user_id), 
-                            batch_num, 
-                            background_tasks, 
-                            semaphore
+                        batch_num += 1
+                        await loop.run_in_executor(
+                            None, 
+                            IngestionService._flush_buffer_hybrid,
+                            supabase, list(prompts_buffer), str(user_id), batch_num, background_tasks, semaphore
                         )
-                        success_count += batch_count
-                        logger.info(f"Batch {batch_num}: Processed {batch_count} items")
+                        success_count += len(prompts_buffer)
+                        logger.info(f"Batch {batch_num}: Processed {len(prompts_buffer)} items")
                     except Exception as e:
                         logger.error(f"Failed to flush batch {batch_num}: {e}")
                         failed_batch_ids.append(batch_num)
-                        # Don't stop processing, mark batch as failed and continue
-                        # This allows partial recovery
-                    finally:
-                        prompts_buffer = []
+                        # DUMP FAILED DATA
+                        try:
+                            with open("failed_prompts.jsonl", "a", encoding="utf-8") as f:
+                                for item in prompts_buffer:
+                                    f.write(json.dumps({
+                                        "content": item.get("content", ""),
+                                        "reason": f"Batch {batch_num} failed: {str(e)}",
+                                        "timestamp": datetime.now().isoformat()
+                                    }) + "\n")
+                        except Exception as log_e:
+                            logger.error(f"Failed to log failed batch: {log_e}")
+                            
+                    prompts_buffer.clear()
                     
                     # Update progress with EMBEDDING stage
                     if job_id:
@@ -364,28 +368,35 @@ class IngestionService:
             
             # Flush remaining buffer
             if prompts_buffer:
-                batch_num += 1
-                batch_count = len(prompts_buffer)
-                
-                if job_id:
-                    IngestionJobService.update_progress(
-                        job_id, "EMBEDDING", current_count=success_count
-                    )
-                
                 try:
-                    await IngestionService._flush_buffer_hybrid(
-                        supabase, 
-                        prompts_buffer, 
-                        str(user_id), 
-                        batch_num, 
-                        background_tasks, 
-                        semaphore
+                    batch_num += 1
+                    await loop.run_in_executor(
+                        None, 
+                        IngestionService._flush_buffer_hybrid,
+                        supabase, list(prompts_buffer), str(user_id), batch_num, background_tasks, semaphore
                     )
-                    success_count += batch_count
-                    logger.info(f"Batch {batch_num} (final): Processed {batch_count} items")
+                    success_count += len(prompts_buffer)
+                    logger.info(f"Batch {batch_num} (final): Processed {len(prompts_buffer)} items")
+                    
+                    if job_id:
+                        IngestionJobService.update_progress(
+                            job_id, "EMBEDDING", current_count=success_count
+                        )
+                        
                 except Exception as e:
                     logger.error(f"Failed to flush final batch {batch_num}: {e}")
                     failed_batch_ids.append(batch_num)
+                    # DUMP FAILED DATA
+                    try:
+                        with open("failed_prompts.jsonl", "a", encoding="utf-8") as f:
+                            for item in prompts_buffer:
+                                f.write(json.dumps({
+                                    "content": item.get("content", ""),
+                                    "reason": f"Final batch {batch_num} failed: {str(e)}",
+                                    "timestamp": datetime.now().isoformat()
+                                }) + "\n")
+                    except Exception as log_e:
+                        logger.error(f"Failed to log failed batch: {log_e}")
             
             # --- Wait for background embedding tasks to complete ---
             if background_tasks:
@@ -523,36 +534,68 @@ class IngestionService:
         # Pre-fetch existing IDs to avoid batch failure on duplicates
         if check_ids:
             try:
-                # We assume batch is from same user. Check uniqueness on (user_id, external_id)
-                # Note: Theoretical edge case if source differs, but usually consistent in upload.
                 existing_res = supabase.table("prompts").select("external_id") \
                     .eq("user_id", user_id) \
                     .in_("external_id", check_ids) \
                     .execute()
                 existing_ids = {row["external_id"] for row in existing_res.data}
                 if existing_ids:
-                    logger.info(f"Batch {batch_num}: Found {len(existing_ids)} duplicates, skipping them.")
+                    logger.info(f"Batch {batch_num}: Found {len(existing_ids)} duplicates in DB, skipping them.")
             except Exception as e:
                 logger.warning(f"Failed to check duplicates for batch {batch_num}: {e}")
-                
+        
+        seen_ids = set()
+        
+        # Log DUPLICATES to a separate file (as mostly noise/info)
+        try:
+             duplicate_file = open("duplicate_prompts.jsonl", "a", encoding="utf-8")
+        except Exception as e:
+             logger.error(f"Failed to open duplicate log file: {e}")
+             duplicate_file = None
+
         for item in batch:
-            # Skip if already exists
-            if item.get("external_id") in existing_ids:
+            ext_id = item.get("external_id")
+            skipped_reason = None
+            
+            # 1. Skip if exists in DB
+            if ext_id and ext_id in existing_ids:
+                skipped_reason = "already_in_db"
+            
+            # 2. Skip if duplicate within this batch
+            elif ext_id:
+                if ext_id in seen_ids:
+                    skipped_reason = "duplicate_in_batch"
+                else:
+                    seen_ids.add(ext_id)
+            
+            if skipped_reason:
+                if duplicate_file:
+                    try:
+                        log_entry = {
+                            "external_id": ext_id,
+                            "source": item.get("source"),
+                            "content": item.get("content", ""),
+                            "reason": skipped_reason,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        duplicate_file.write(json.dumps(log_entry) + "\n")
+                    except Exception:
+                        pass
                 continue
                 
             insert_item = {k: v for k, v in item.items() if k != "embedding"}
             
-            # WORKAROUND: Postgres/Supabase trigger seems to fail on backslashes in content 
-            # (likely casting to bytea for hash generation incorrectly).
-            # We strip backslashes to prevent "invalid input syntax for type bytea".
+            # WORKAROUND backslashes
             if "content" in insert_item and isinstance(insert_item["content"], str):
                 insert_item["content"] = insert_item["content"].replace("\\", "")
                 
             insert_batch.append(insert_item)
+            
+        if duplicate_file:
+            duplicate_file.close()
         
         if not insert_batch:
             logger.info(f"Batch {batch_num}: All items were duplicates. Skipping insert.")
-            # We still proceed to background tasks to ensure embeddings exist (idempotent)
         else:
             try:
                 loop = asyncio.get_event_loop()

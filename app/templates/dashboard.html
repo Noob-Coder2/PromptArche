@@ -6,7 +6,8 @@
 <div class="space-y-8">
     <!-- Header -->
     <header>
-        <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary mb-2">Your
+        <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary mb-2">
+            Your
             Evolution</h1>
         <p class="text-lg text-slate-400">Analysis of your prompting journey.</p>
     </header>
@@ -14,24 +15,94 @@
     <!-- Stats Overview -->
     <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <!-- Card 1 -->
-        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
+        <div
+            class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
             <div class="px-6 py-8 sm:p-8">
                 <dt class="text-base font-medium text-slate-400 truncate">Total Prompts</dt>
                 <dd class="mt-2 text-4xl font-bold text-white">{{ stats.total_prompts }}</dd>
             </div>
         </div>
         <!-- Card 2 -->
-        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
+        <div
+            class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
             <div class="px-6 py-8 sm:p-8">
                 <dt class="text-base font-medium text-slate-400 truncate">Clusters Identified</dt>
                 <dd class="mt-2 text-4xl font-bold text-white">{{ stats.total_clusters }}</dd>
             </div>
         </div>
         <!-- Card 3 -->
-        <div class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
+        <div
+            class="bg-slate-900 overflow-hidden shadow rounded-lg border border-white/5 hover:border-primary/50 transition">
             <div class="px-6 py-8 sm:p-8">
                 <dt class="text-base font-medium text-slate-400 truncate">Insights Generated</dt>
                 <dd class="mt-2 text-4xl font-bold text-white">{{ stats.total_insights }}</dd>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pipeline Actions -->
+    <div class="bg-slate-900 shadow rounded-lg border border-white/5 p-8" id="pipeline-actions-card">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <div>
+                <h3 class="text-2xl leading-8 font-bold text-white">Pipeline Actions</h3>
+                <p class="text-sm text-slate-400 mt-1">Manually run clustering or insight generation on your data.</p>
+            </div>
+            <button onclick="refreshPipelineStatus()" title="Refresh status"
+                class="text-slate-400 hover:text-white transition text-sm flex items-center gap-1 self-start sm:self-auto">
+                <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+                    viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <!-- Clustering Action -->
+            <div class="bg-slate-800/60 rounded-lg p-6 border border-white/5 flex flex-col gap-4">
+                <div>
+                    <h4 class="text-lg font-semibold text-white">Run Clustering</h4>
+                    <p class="text-sm text-slate-400 mt-1">Groups your prompts into semantic clusters using UMAP +
+                        HDBSCAN.</p>
+                    <p class="text-sm mt-3">
+                        <span class="text-slate-400">Prompts awaiting clustering: </span>
+                        <span id="unclustered-count" class="font-bold text-indigo-400">—</span>
+                    </p>
+                </div>
+                <button id="btn-cluster" onclick="triggerClustering()"
+                    class="mt-auto w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm transition">
+                    <svg id="spinner-cluster" class="hidden animate-spin h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                    <span id="btn-cluster-label">Run Clustering</span>
+                </button>
+            </div>
+
+            <!-- Insights Action -->
+            <div class="bg-slate-800/60 rounded-lg p-6 border border-white/5 flex flex-col gap-4">
+                <div>
+                    <h4 class="text-lg font-semibold text-white">Generate Insights</h4>
+                    <p class="text-sm text-slate-400 mt-1">Uses AI to generate a punchy label and brutal insight for
+                        each cluster.</p>
+                    <p class="text-sm mt-3">
+                        <span class="text-slate-400">Clusters awaiting insights: </span>
+                        <span id="pending-insights-count" class="font-bold text-indigo-400">—</span>
+                    </p>
+                </div>
+                <button id="btn-insights" onclick="triggerInsights()"
+                    class="mt-auto w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm transition">
+                    <svg id="spinner-insights" class="hidden animate-spin h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                    </svg>
+                    <span id="btn-insights-label">Generate Insights</span>
+                </button>
             </div>
         </div>
     </div>
@@ -60,7 +131,8 @@
                     </p>
                     <div class="pt-4 border-t border-white/5">
                         <a href="/cluster/{{ cluster.id }}"
-                            class="text-primary hover:text-indigo-300 font-medium transition text-base">View Analysis &rarr;</a>
+                            class="text-primary hover:text-indigo-300 font-medium transition text-base">View Analysis
+                            &rarr;</a>
                     </div>
                 </div>
             </div>
@@ -76,6 +148,9 @@
 </div>
 
 <script>
+    // -----------------------------------------------------------------------
+    // Timeline Chart
+    // -----------------------------------------------------------------------
     document.addEventListener('DOMContentLoaded', function () {
         const ctx = document.getElementById('timelineChart').getContext('2d');
         const data = {{ chart_data | tojson
@@ -97,20 +172,166 @@
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                },
-                x: {
-                    grid: { display: false }
-                }
+                y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                x: { grid: { display: false } }
             }
         }
     });
+
+    // Load pipeline status on page load
+    refreshPipelineStatus();
+    // Fetch CSRF token for pipeline POST requests
+    fetchCsrfToken();
     });
+
+    // -----------------------------------------------------------------------
+    // Pipeline Actions
+    // -----------------------------------------------------------------------
+    let _pollTimer = null;
+    let _csrfToken = '';
+
+    async function fetchCsrfToken() {
+        try {
+            const res = await fetch('/api/csrf-token');
+            const data = await res.json();
+            _csrfToken = data.token || data.csrf_token || '';
+        } catch (e) {
+            console.warn('Could not fetch CSRF token:', e);
+        }
+    }
+
+    async function refreshPipelineStatus() {
+        try {
+            const res = await fetch('/api/pipeline/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            applyPipelineStatus(data);
+        } catch (e) {
+            console.warn('Could not fetch pipeline status:', e);
+        }
+    }
+
+    function applyPipelineStatus(data) {
+        const unclusteredEl = document.getElementById('unclustered-count');
+        const pendingInsEl = document.getElementById('pending-insights-count');
+        const btnCluster = document.getElementById('btn-cluster');
+        const btnInsights = document.getElementById('btn-insights');
+        const spinnerCluster = document.getElementById('spinner-cluster');
+        const spinnerInsights = document.getElementById('spinner-insights');
+        const labelCluster = document.getElementById('btn-cluster-label');
+        const labelInsights = document.getElementById('btn-insights-label');
+
+        const unclustered = data.unclustered_prompts ?? 0;
+        const pendingInsights = data.clusters_without_insights ?? 0;
+        const clusterRunning = data.clustering_running ?? false;
+        const insightsRunning = data.insights_running ?? false;
+
+        unclusteredEl.textContent = unclustered;
+        pendingInsEl.textContent = pendingInsights;
+
+        // Clustering button state
+        if (clusterRunning) {
+            spinnerCluster.classList.remove('hidden');
+            labelCluster.textContent = 'Running…';
+            btnCluster.disabled = true;
+        } else {
+            spinnerCluster.classList.add('hidden');
+            labelCluster.textContent = 'Run Clustering';
+            btnCluster.disabled = (unclustered === 0);
+        }
+
+        // Insights button state
+        if (insightsRunning) {
+            spinnerInsights.classList.remove('hidden');
+            labelInsights.textContent = 'Running…';
+            btnInsights.disabled = true;
+        } else {
+            spinnerInsights.classList.add('hidden');
+            labelInsights.textContent = 'Generate Insights';
+            btnInsights.disabled = (pendingInsights === 0);
+        }
+
+        // If either job is still running, keep polling; otherwise stop
+        const anyRunning = clusterRunning || insightsRunning;
+        if (anyRunning) {
+            _startPolling();
+        } else {
+            _stopPolling();
+        }
+    }
+
+    function _startPolling() {
+        if (_pollTimer) return; // already polling
+        _pollTimer = setInterval(async () => {
+            const res = await fetch('/api/pipeline/status').catch(() => null);
+            if (!res || !res.ok) return;
+            const data = await res.json();
+            applyPipelineStatus(data);
+            // If nothing is running anymore, reload to refresh cluster cards + stats
+            if (!data.clustering_running && !data.insights_running) {
+                _stopPolling();
+                window.location.reload();
+            }
+        }, 3000);
+    }
+
+    function _stopPolling() {
+        if (_pollTimer) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+    }
+
+    async function triggerClustering() {
+        const btn = document.getElementById('btn-cluster');
+        btn.disabled = true;
+        document.getElementById('spinner-cluster').classList.remove('hidden');
+        document.getElementById('btn-cluster-label').textContent = 'Starting…';
+
+        try {
+            const res = await fetch('/api/pipeline/run-clustering', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': _csrfToken }
+            });
+            const data = await res.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                _startPolling();
+                // Immediately refresh status to get running=true reflected
+                await refreshPipelineStatus();
+            }
+        } catch (e) {
+            console.error('Failed to start clustering:', e);
+            // Re-enable on error
+            btn.disabled = false;
+            document.getElementById('spinner-cluster').classList.add('hidden');
+            document.getElementById('btn-cluster-label').textContent = 'Run Clustering';
+        }
+    }
+
+    async function triggerInsights() {
+        const btn = document.getElementById('btn-insights');
+        btn.disabled = true;
+        document.getElementById('spinner-insights').classList.remove('hidden');
+        document.getElementById('btn-insights-label').textContent = 'Starting…';
+
+        try {
+            const res = await fetch('/api/pipeline/run-insights', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': _csrfToken }
+            });
+            const data = await res.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                _startPolling();
+                await refreshPipelineStatus();
+            }
+        } catch (e) {
+            console.error('Failed to start insights:', e);
+            btn.disabled = false;
+            document.getElementById('spinner-insights').classList.add('hidden');
+            document.getElementById('btn-insights-label').textContent = 'Generate Insights';
+        }
+    }
 </script>
 {% endblock %}

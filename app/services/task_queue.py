@@ -226,7 +226,7 @@ class TaskQueueService:
             raise ValueError("Missing required job data: file_path, provider")
         
         try:
-            # Run async ingestion directly (fully async pipeline)
+            # Run async ingestion (fully async pipeline)
             with open(file_path, 'rb') as f:
                 result = await IngestionService.ingest_async(
                     f,
@@ -236,6 +236,43 @@ class TaskQueueService:
                 )
             
             logger.info(f"Ingestion job {job_id} completed: {result}")
+            
+            # --- Post-Ingestion Pipeline ---
+            # Only proceed if ingestion was successful and processed items
+            if result.get("status") == "success" and result.get("processed", 0) > 0:
+                logger.info(f"Starting post-ingestion analysis for user {user_id}")
+                
+                try:
+                    # 1. Clustering (Sync)
+                    # Note: This requires embeddings to be present (via background task or backfill RPC)
+                    # The ingestion service waits for embedding tasks, so we should be good IF logic handled it.
+                    # BUT: If backfill RPC "backfill_embeddings_from_cache" was not run manually, 
+                    # prompts.embedding might be NULL. Clustering checks for non-null embeddings.
+                    from app.services.clustering import run_clustering_for_user
+                    
+                    logger.info("Running clustering...")
+                    # Run in thread pool since it's CPU bound (UMAP/HDBSCAN)
+                    clustering_res = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        run_clustering_for_user,
+                        user_id
+                    )
+                    logger.info(f"Clustering result: {clustering_res}")
+                    
+                    # 2. Insights (Async)
+                    # Only run if clusters were found/created
+                    if clustering_res.get("clusters_found", 0) > 0:
+                        from app.services.insights import generate_insights_for_user
+                        logger.info("Generating insights...")
+                        insights_res = await generate_insights_for_user(user_id)
+                        logger.info(f"Insights result: {insights_res}")
+                    else:
+                        logger.info("Skipping insights (no clusters found)")
+                        
+                except Exception as e:
+                    logger.error(f"Post-ingestion analysis failed: {e}", exc_info=True)
+                    # We don't fail the *ingestion* job, but we log the error.
+
         
         finally:
             # Always cleanup temp file
